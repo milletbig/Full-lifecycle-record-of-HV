@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>混动车日常费用记录</title>
+    <!-- Element Plus CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <style>
+        body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; }
+        #app { max-width: 1300px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1); }
+        .chart-container { height: 230px; width: 100%; margin-bottom: 15px; }
+        .el-form-item { margin-bottom: 18px; }
+        .version-tag { font-size: 14px; color: #909399; margin-left: 15px; font-weight: normal; }
+        .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ebeef5; }
+        .log-list { padding-left: 20px; color: #606266; font-size: 14px; line-height: 1.8; margin-top: 5px; }
+        
+        /* 管家卡片样式 */
+        .maint-card { background: #fdf6ec; border-left: 5px solid #e6a23c; border-radius: 4px; padding: 15px; margin-bottom: 20px; font-size: 13px; color: #606266; }
+        .maint-title { font-weight: bold; color: #e6a23c; font-size: 15px; margin-bottom: 8px; }
+        .reminder-item { font-size: 12.5px; line-height: 1.6; border-bottom: 1px dashed #f5dab1; padding-bottom: 8px; margin-bottom: 8px; }
+        .reminder-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .text-danger { color: #F56C6C; font-weight: bold; }
+        .stats-summary { font-size: 14px; font-weight: bold; background: #f4f4f5; padding: 8px 15px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <el-tabs v-model="activeTab" @tab-click="handleTabClick">
+            <!-- ================= 首页：录入与展示 ================= -->
+            <el-tab-pane label="首页" name="home">
+                <el-row :gutter="20">
+                    <!-- 左侧区域 -->
+                    <el-col :span="8">
+                        <!-- 智能管家预测与提醒 (常驻显示) -->
+                        <div class="maint-card">
+                            <div class="maint-title">🛠️ 智能管家提醒</div>
+                            <div style="font-size: 12px; margin-bottom: 8px;">当前最高总里程：{{ maintenanceInfo ? maintenanceInfo.currentMileage : 0 }} km</div>
+                            
+                            <!-- 保养提醒 -->
+                            <div class="reminder-item">
+                                <strong style="color: #303133;">保养：</strong>
+                                <template v-if="maintenanceInfo && maintenanceInfo.hasRecord">
+                                    上次 {{ maintenanceInfo.lastDate }} ({{ maintenanceInfo.lastMileage }}km)<br/>
+                                    预测 <span :class="{'text-danger': maintenanceInfo.remainingKm < 1000 || maintenanceInfo.remainingDays < 30}">{{ maintenanceInfo.targetMileage }}km 或 {{ maintenanceInfo.targetDateStr }}</span>
+                                    (余 <span :class="{'text-danger': maintenanceInfo.remainingKm < 1000}">{{ maintenanceInfo.remainingKm }}</span>km / <span :class="{'text-danger': maintenanceInfo.remainingDays < 30}">{{ maintenanceInfo.remainingDays }}</span>天)
+                                </template>
+                                <template v-else><span style="color: #909399;">暂无有效记录。录入附带里程的记录以激活。</span></template>
+                            </div>
+
+                            <!-- 保险提醒 -->
+                            <div class="reminder-item">
+                                <strong style="color: #303133;">保险：</strong>
+                                <template v-if="insuranceInfo">
+                                    上次投保 {{ insuranceInfo.lastDate }}<br/>
+                                    到期 <span :class="{'text-danger': insuranceInfo.remainingDays < 30}">{{ insuranceInfo.targetDateStr }}</span>
+                                    (剩余 <span :class="{'text-danger': insuranceInfo.remainingDays < 30}">{{ insuranceInfo.remainingDays }}</span>天)
+                                </template>
+                                <template v-else><span style="color: #909399;">暂无有效记录。</span></template>
+                            </div>
+
+                            <!-- 年检提醒 -->
+                            <div class="reminder-item">
+                                <strong style="color: #303133;">年检：</strong>
+                                <template v-if="inspectionInfo">
+                                    上次年检 {{ inspectionInfo.lastDate }}<br/>
+                                    到期 <span :class="{'text-danger': inspectionInfo.remainingDays < 30}">{{ inspectionInfo.targetDateStr }}</span>
+                                    (剩余 <span :class="{'text-danger': inspectionInfo.remainingDays < 30}">{{ inspectionInfo.remainingDays }}</span>天)
+                                </template>
+                                <template v-else><span style="color: #909399;">暂无有效记录。</span></template>
+                            </div>
+                        </div>
+
+                        <h3>新增记录</h3>
+                        <el-form :model="form" label-width="100px" size="default">
+                            <el-form-item label="当前车辆">
+                                <el-select v-model="currentVehicleId" @change="handleVehicleChange" style="width: 100%;">
+                                    <el-option v-for="v in vehicles" :key="v.id" :label="v.name" :value="v.id"></el-option>
+                                </el-select>
+                            </el-form-item>
+
+                            <el-divider border-style="dashed" style="margin: 15px 0;"></el-divider>
+
+                            <el-form-item label="日期">
+                                <el-date-picker v-model="form.date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 100%;"></el-date-picker>
+                            </el-form-item>
+                            
+                            <el-form-item label="收支类型">
+                                <el-radio-group v-model="form.recordType" @change="handleRecordTypeChange">
+                                    <el-radio-button label="expense">支出</el-radio-button>
+                                    <el-radio-button label="income">收入</el-radio-button>
+                                </el-radio-group>
+                            </el-form-item>
+
+                            <el-form-item label="记录类别">
+                                <el-select v-model="form.categoryId" placeholder="请选择一级类别" @change="handleCategoryChange" style="width: 100%;">
+                                    <el-option v-for="cat in filteredCategories" :key="cat.id" :label="cat.name" :value="cat.id"></el-option>
+                                </el-select>
+                            </el-form-item>
+
+                            <el-form-item v-if="currentCategory && currentCategory.hasSub" label="具体项目">
+                                <el-select v-model="form.subCategory" placeholder="请选择二级项目" style="width: 100%;">
+                                    <el-option v-for="sub in currentCategory.subItems" :key="sub" :label="sub" :value="sub"></el-option>
+                                </el-select>
+                            </el-form-item>
+
+                            <el-form-item v-if="currentCategory && currentCategory.name === '加油'" label="加油升数 (L)">
+                                <el-input-number v-model="form.liters" :min="0" :precision="2" :step="1" style="width: 100%;"></el-input-number>
+                            </el-form-item>
+
+                            <el-form-item :label="form.recordType === 'income' ? '收入金额(元)' : '支出金额(元)'">
+                                <el-input-number v-model="form.amount" :min="0" :precision="2" :step="10" style="width: 100%;"></el-input-number>
+                            </el-form-item>
+
+                            <template v-if="currentCategory && currentCategory.requireMileage">
+                                <el-form-item label="HEV里程(km)">
+                                    <el-input-number v-model="form.hev" :min="0" :step="10" style="width: 100%;"></el-input-number>
+                                </el-form-item>
+
+                                <el-form-item label="EV里程(km)">
+                                    <el-input-number v-model="form.ev" :min="0" :step="10" style="width: 100%;"></el-input-number>
+                                </el-form-item>
+
+                                <el-form-item label="总里程(km)">
+                                    <el-input-number v-model="form.totalMileage" :min="0" :step="10" style="width: 100%;" placeholder="可自动计算或手动输入"></el-input-number>
+                                </el-form-item>
+                            </template>
+
+                            <el-form-item>
+                                <el-button type="primary" @click="saveRecord">保存记录</el-button>
+                            </el-form-item>
+                        </el-form>
+                    </el-col>
+
+                    <!-- 右侧图表区域 -->
+                    <el-col :span="16">
+                        <div class="chart-header">
+                            <span style="font-weight: bold; font-size: 16px;">数据分析图表 ({{ currentVehicleName }})</span>
+                            <el-radio-group v-model="chartPeriod" @change="updateCharts" size="small">
+                                <el-radio-button label="all">全部</el-radio-button>
+                                <el-radio-button label="last3months">近3月</el-radio-button>
+                                <el-radio-button label="last6months">近半年</el-radio-button>
+                                <el-radio-button label="quarter">季度</el-radio-button>
+                                <el-radio-button label="halfyear">半年</el-radio-button>
+                                <el-radio-button label="year">年</el-radio-button>
+                            </el-radio-group>
+                        </div>
+                        
+                        <!-- 第 1 行: 里程变化 & 纯电比例 -->
+                        <el-row :gutter="10">
+                            <el-col :span="8"><div id="chartTotalMileage" class="chart-container"></div></el-col>
+                            <el-col :span="8"><div id="chartHevEvMileage" class="chart-container"></div></el-col>
+                            <el-col :span="8"><div id="chartEvRatio" class="chart-container"></div></el-col>
+                        </el-row>
+                        
+                        <!-- 第 2 行: 能耗效率 -->
+                        <el-row :gutter="10">
+                            <el-col :span="8"><div id="chartGas" class="chart-container"></div></el-col>
+                            <el-col :span="8"><div id="chartEv" class="chart-container"></div></el-col>
+                            <el-col :span="8"><div id="chartTotalEnergy" class="chart-container"></div></el-col>
+                        </el-row>
+                        
+                        <!-- 第 3 行: 各分类占比 & 综合净费用走势 (比例 10:14) -->
+                        <el-row :gutter="10">
+                            <el-col :span="10"><div id="chartCategoryPie" class="chart-container"></div></el-col>
+                            <el-col :span="14"><div id="chartCost" class="chart-container"></div></el-col>
+                        </el-row>
+
+                        <!-- 第 4 行: 子项目饼图 & 特定分类趋势 (比例 10:14) -->
+                        <el-row :gutter="10">
+                            <el-col :span="10" v-show="showSubCatPie">
+                                <div id="chartSubCategoryPie" class="chart-container"></div>
+                            </el-col>
+                            <el-col :span="showSubCatPie ? 14 : 24">
+                                <div style="position: relative;">
+                                    <div style="position: absolute; top: 0px; right: 10px; z-index: 10;">
+                                        <el-select v-model="selectedChartCategory" size="small" style="width: 110px;" @change="updateCharts" placeholder="选择分类">
+                                            <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.name"></el-option>
+                                        </el-select>
+                                    </div>
+                                    <div id="chartCategoryTrend" class="chart-container"></div>
+                                </div>
+                            </el-col>
+                        </el-row>
+
+                    </el-col>
+                </el-row>
+
+                <el-divider></el-divider>
+
+                <!-- 事件记录表格与高级筛选 -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 15px;">
+                    <h3>事件记录 ({{ currentVehicleName }})</h3>
+                    <div class="stats-summary">
+                        当前筛选合计：
+                        <span style="color: #F56C6C;">支出 {{ tableStats.exp.toFixed(2) }} 元</span> | 
+                        <span style="color: #67C23A;">收入 {{ tableStats.inc.toFixed(2) }} 元</span>
+                    </div>
+                </div>
+
+                <el-form :inline="true" :model="tableFilter" size="small" style="background: #fafafa; padding: 12px 15px 0 15px; border-radius: 4px; margin-bottom: 15px;">
+                    <el-form-item label="日期范围">
+                        <el-date-picker v-model="tableFilter.dateRange" type="daterange" value-format="YYYY-MM-DD" clearable placeholder="选择范围" style="width: 220px;"></el-date-picker>
+                    </el-form-item>
+                    <el-form-item label="收支类型">
+                        <el-select v-model="tableFilter.recordType" clearable placeholder="全部类型" style="width: 100px;">
+                            <el-option label="支出" value="expense"></el-option>
+                            <el-option label="收入" value="income"></el-option>
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="一级分类">
+                        <el-select v-model="tableFilter.categoryId" clearable placeholder="全部分类" style="width: 120px;">
+                            <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id"></el-option>
+                        </el-select>
+                    </el-form-item>
+                </el-form>
+
+                <el-table :data="paginatedRecords" style="width: 100%" border stripe>
+                    <el-table-column prop="date" label="日期" width="110"></el-table-column>
+                    <el-table-column label="收/支" width="70">
+                        <template #default="scope">
+                            <el-tag :type="scope.row.recordType === 'income' ? 'success' : 'danger'" size="small">
+                                {{ scope.row.recordType === 'income' ? '收入' : '支出' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="categoryName" label="类别" width="90"></el-table-column>
+                    <el-table-column prop="subCategory" label="具体项目" width="120"></el-table-column>
+                    <el-table-column label="金额(元)" width="100">
+                        <template #default="scope">
+                            <span :style="{ color: scope.row.recordType === 'income' ? '#67C23A' : '#F56C6C', fontWeight: 'bold' }">
+                                {{ scope.row.recordType === 'income' ? '+' : '-' }}{{ scope.row.amount }}
+                            </span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="总里程" width="90">
+                        <template #default="scope">
+                            <span v-if="!requiresMileage(scope.row.categoryName)">-</span>
+                            <span v-else>{{ scope.row.totalMileage || (scope.row.hev + scope.row.ev) || 0 }}</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="HEV" width="80">
+                        <template #default="scope">
+                            {{ !requiresMileage(scope.row.categoryName) ? '-' : scope.row.hev }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="EV" width="80">
+                        <template #default="scope">
+                            {{ !requiresMileage(scope.row.categoryName) ? '-' : scope.row.ev }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="liters" label="备注(升数)" width="90">
+                        <template #default="scope">{{ scope.row.liters ? scope.row.liters : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="90">
+                        <template #default="scope">
+                            <el-button size="small" type="danger" @click="deleteRecord(scope.row.id)">删除</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+                <el-pagination 
+                    style="margin-top: 15px;" 
+                    background 
+                    layout="total, prev, pager, next" 
+                    :total="filteredTableRecords.length" 
+                    :page-size="pageSize" 
+                    v-model:current-page="currentPage">
+                </el-pagination>
+            </el-tab-pane>
+
+            <!-- ================= 设置：多车管理、类别、单位与日志 ================= -->
+            <el-tab-pane label="设置" name="settings">
+                
+                <h3>车辆管理</h3>
+                <el-button type="primary" @click="addVehicle" style="margin-bottom: 20px;">新增车辆</el-button>
+                <el-table :data="vehicles" style="width: 100%; max-width: 600px;" border>
+                    <el-table-column prop="name" label="车辆名称" width="200"></el-table-column>
+                    <el-table-column label="操作" width="160">
+                        <template #default="scope">
+                            <el-button size="small" @click="editVehicle(scope.$index)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="deleteVehicle(scope.$index)" :disabled="vehicles.length === 1">删除</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+
+                <el-divider></el-divider>
+                
+                <h3>图表与业务参数设置</h3>
+                <el-form label-width="150px" size="default" style="margin-bottom: 30px; max-width: 600px;">
+                    <el-form-item label="能耗/费用单位">
+                        <el-radio-group v-model="appSettings.costUnit" @change="saveSettings">
+                            <el-radio-button label="元/百公里">元/百公里</el-radio-button>
+                            <el-radio-button label="元/公里">元/公里</el-radio-button>
+                        </el-radio-group>
+                    </el-form-item>
+                    <el-form-item label="油耗单位">
+                        <el-radio-group v-model="appSettings.fuelUnit" @change="saveSettings">
+                            <el-radio-button label="L/百公里">L/百公里</el-radio-button>
+                            <el-radio-button label="L/公里">L/公里</el-radio-button>
+                        </el-radio-group>
+                    </el-form-item>
+                    <el-form-item label="保养提醒里程(km)">
+                        <el-input-number v-model="appSettings.maintKm" :min="1000" :step="1000" @change="saveSettings"></el-input-number>
+                    </el-form-item>
+                    <el-form-item label="保养提醒间隔(月)">
+                        <el-input-number v-model="appSettings.maintMonths" :min="1" :step="1" @change="saveSettings"></el-input-number>
+                    </el-form-item>
+                </el-form>
+
+                <el-divider></el-divider>
+
+                <h3>类别管理</h3>
+                <div style="margin-bottom: 20px;">
+                    <el-button type="danger" @click="addCategory('expense')">新增支出类别</el-button>
+                    <el-button type="success" @click="addCategory('income')">新增收入类别</el-button>
+                </div>
+                
+                <el-table :data="categories" style="width: 100%" border>
+                    <el-table-column label="收/支" width="80">
+                        <template #default="scope">
+                            <el-tag :type="scope.row.type === 'income' ? 'success' : 'danger'" size="small">
+                                {{ scope.row.type === 'income' ? '收入' : '支出' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="name" label="一级类别" width="100"></el-table-column>
+                    <el-table-column label="是否记录里程" width="110" align="center">
+                        <template #default="scope">
+                            <el-switch v-model="scope.row.requireMileage" @change="saveCategories"></el-switch>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="启用二级菜单" width="110" align="center">
+                        <template #default="scope">
+                            <el-switch v-model="scope.row.hasSub" @change="saveCategories"></el-switch>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="二级标签(回车添加, 点击标签删除)">
+                        <template #default="scope">
+                            <template v-if="scope.row.hasSub">
+                                <el-tag 
+                                    v-for="(tag, index) in scope.row.subItems" 
+                                    :key="tag" 
+                                    closable 
+                                    @close="removeSubItem(scope.row, index)"
+                                    style="margin-right: 8px; margin-bottom: 5px;">
+                                    {{ tag }}
+                                </el-tag>
+                                <el-input
+                                    v-model="scope.row.newSubInput"
+                                    placeholder="输入后回车"
+                                    size="small"
+                                    style="width: 120px;"
+                                    @keyup.enter="addSubItem(scope.row)"
+                                ></el-input>
+                            </template>
+                            <span v-else>不可用</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="160">
+                        <template #default="scope">
+                            <el-button size="small" @click="editCategory(scope.$index)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="deleteCategory(scope.$index)">删除</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+
+                <el-divider></el-divider>
+
+                <!-- 数据管理 -->
+                <h3>数据备份与恢复 (纯本地零依赖)</h3>
+                <el-alert title="所有数据均保存在您的浏览器本地缓存中。建议定期导出备份，以免清理浏览器缓存导致数据丢失。" type="warning" show-icon style="margin-bottom: 20px;"></el-alert>
+                
+                <el-button type="success" size="large" @click="exportData">备份数据 (导出 JSON)</el-button>
+                <el-divider direction="vertical"></el-divider>
+                <el-button type="primary" size="large" @click="exportCSV">导出表格 (CSV)</el-button>
+                <el-divider direction="vertical"></el-divider>
+                <input type="file" id="fileInput" accept=".json" style="display: none" @change="importData">
+                <el-button type="warning" size="large" @click="triggerFileInput">恢复数据 (导入 JSON)</el-button>
+
+                <el-divider></el-divider>
+
+                <!-- 更新日志 -->
+                <h3>版本与更新日志</h3>
+                <el-collapse v-model="activeVersionLog">
+                    <el-collapse-item title="版本：2026.09.01 (当前版本)" name="2026.09.01">
+                        <ul class="log-list">
+                            <li><strong>字典规范化：</strong>重构并固化了全部默认一二级支出/收入类目（移除旧“高速”，统一为“高速费”等），并严格绑定各自的里程与二级菜单规则。</li>
+                            <li><strong>多维时间窗：</strong>图表分析区新增“近半年”与“半年（自然半年）”尺度选择，补齐中长期数据洞察能力。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：26.08.16" name="16">
+                        <ul class="log-list">
+                            <li>里程算法兼容：修复旧历史数据只记录HEV/EV未合并总里程导致保养无法触发的问题。</li>
+                            <li>提醒管家升级：加入基于时间的“保险”和“年检”项目独立到期倒计时提醒。</li>
+                            <li>饼图排版优化：缩小饼图半径并开启标签强制折行，避免图例重叠截断。</li>
+                            <li>新增 CSV 导出：支持将明细记录一键导出为标准 Excel 表格。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：26.08.15" name="15">
+                        <ul class="log-list">
+                            <li>优化排版：重构图表区域结构，无子项时隐藏饼图并自动拉伸走势图，解决覆盖问题。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：26.08.13 - 26.08.14" name="14">
+                        <ul class="log-list">
+                            <li>新增纯电行驶比例 (EV Ratio) 趋势图表及特定分类的二级项目下钻饼图。</li>
+                            <li>新增车辆和类别名称的编辑功能，自动全局同步历史账单。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="历史版本汇总" name="old">
+                        <ul class="log-list">
+                            <li><strong>26.08.11 - 26.08.12：</strong>多车管理支持、收支分离体系及净费用公式重塑。</li>
+                            <li><strong>26.08.01 - 26.08.10：</strong>单机架构初建，从基础表单演进为按周期补零绘图的费用分析沙盒。</li>
+                        </ul>
+                    </el-collapse-item>
+                </el-collapse>
+            </el-tab-pane>
+        </el-tabs>
+    </div>
+
+    <!-- Vue 3 & Element Plus & ECharts Scripts -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
+
+    <script>
+        const { createApp, ref, reactive, computed, onMounted, nextTick, watch } = Vue;
+
+        const app = createApp({
+            setup() {
+                // =============== 数据状态 ===============
+                const activeTab = ref('home');
+                const chartPeriod = ref('all'); 
+                const selectedChartCategory = ref(''); 
+                const activeVersionLog = ref(['2026.09.01']); 
+                
+                const appSettings = reactive({
+                    costUnit: '元/百公里',
+                    fuelUnit: 'L/百公里',
+                    maintKm: 10000,
+                    maintMonths: 12
+                });
+
+                const vehicles = ref([]);
+                const currentVehicleId = ref('');
+                
+                const defaultVehicles = [
+                    { id: 'v_default', name: '默认爱车' }
+                ];
+
+                const defaultCategories = [
+                    { id: '1', name: '加油', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: true },
+                    { id: '2', name: '充电', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: true },
+                    { id: '3', name: '保险', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '4', name: '保养', type: 'expense', hasSub: true, subItems: ['机油机滤', '空调滤芯', '空气滤芯'], newSubInput: '', requireMileage: true },
+                    { id: '5', name: '维修', type: 'expense', hasSub: true, subItems: ['更换雨刮', '轮胎更换', '钣金喷漆', '太阳膜'], newSubInput: '', requireMileage: true },
+                    { id: '6', name: '违章', type: 'expense', hasSub: true, subItems: ['超速', '闯红灯', '违停', '违规变道'], newSubInput: '', requireMileage: false },
+                    { id: '7', name: '停车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '8', name: '高速费', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '10', name: '洗车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '11', name: '购车/车贷', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '12', name: '年检', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '9', name: '顺风车', type: 'income', hasSub: false, subItems: [], newSubInput: '', requireMileage: false }
+                ];
+
+                const categories = ref([]);
+                const records = ref([]);
+                
+                const form = reactive({
+                    id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '',
+                    amount: 0, hev: 0, ev: 0, liters: 0, totalMileage: 0
+                });
+
+                // 核心获取真实里程的函数
+                const getMileage = (r) => r.totalMileage || (r.hev + r.ev) || 0;
+
+                const tableFilter = reactive({ dateRange: [], recordType: '', categoryId: '' });
+
+                const activeRecords = computed(() => {
+                    return records.value.filter(r => r.vehicleId === currentVehicleId.value);
+                });
+
+                const filteredTableRecords = computed(() => {
+                    let res = activeRecords.value;
+                    if (tableFilter.dateRange && tableFilter.dateRange.length === 2) {
+                        res = res.filter(r => r.date >= tableFilter.dateRange[0] && r.date <= tableFilter.dateRange[1]);
+                    }
+                    if (tableFilter.recordType) res = res.filter(r => r.recordType === tableFilter.recordType);
+                    if (tableFilter.categoryId) res = res.filter(r => r.categoryId === tableFilter.categoryId);
+                    return res;
+                });
+
+                const tableStats = computed(() => {
+                    let exp = 0, inc = 0;
+                    filteredTableRecords.value.forEach(r => {
+                        if(r.recordType === 'expense') exp += r.amount;
+                        else inc += r.amount;
+                    });
+                    return { exp, inc };
+                });
+
+                const showSubCatPie = computed(() => {
+                    const cat = categories.value.find(c => c.name === selectedChartCategory.value);
+                    return cat ? cat.hasSub : false;
+                });
+
+                // ==================== 智能管家预测模块 ====================
+                const maintenanceInfo = computed(() => {
+                    const mileageRecords = activeRecords.value.filter(r => getMileage(r) > 0);
+                    const currentMileage = mileageRecords.length ? Math.max(...mileageRecords.map(r=>getMileage(r))) : 0;
+                    
+                    const maintRecords = activeRecords.value.filter(r => r.categoryName === '保养' && getMileage(r) > 0).sort((a,b) => new Date(b.date) - new Date(a.date));
+                    
+                    if (!maintRecords.length) return { hasRecord: false, currentMileage };
+                    
+                    const lastMaint = maintRecords[0];
+                    const targetMileage = getMileage(lastMaint) + appSettings.maintKm;
+                    const remainingKm = targetMileage - currentMileage;
+                    
+                    const lastDate = new Date(lastMaint.date);
+                    const targetDate = new Date(lastDate.setMonth(lastDate.getMonth() + appSettings.maintMonths));
+                    const today = new Date();
+                    const remainingDays = Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24));
+                    
+                    return { 
+                        hasRecord: true, lastDate: lastMaint.date, lastMileage: getMileage(lastMaint), 
+                        currentMileage, targetMileage, remainingKm, remainingDays, 
+                        targetDateStr: targetDate.toISOString().slice(0,10) 
+                    };
+                });
+
+                const insuranceInfo = computed(() => {
+                    const records = activeRecords.value.filter(r => r.categoryName === '保险').sort((a,b) => new Date(b.date) - new Date(a.date));
+                    if(!records.length) return null;
+                    const lastRecord = records[0];
+                    const lastDate = new Date(lastRecord.date);
+                    const targetDate = new Date(lastDate.setFullYear(lastDate.getFullYear() + 1));
+                    const remainingDays = Math.ceil((targetDate - new Date()) / (1000 * 60 * 60 * 24));
+                    return { lastDate: lastRecord.date, targetDateStr: targetDate.toISOString().slice(0,10), remainingDays };
+                });
+
+                const inspectionInfo = computed(() => {
+                    const records = activeRecords.value.filter(r => r.categoryName === '年检').sort((a,b) => new Date(b.date) - new Date(a.date));
+                    if(!records.length) return null;
+                    const lastRecord = records[0];
+                    const lastDate = new Date(lastRecord.date);
+                    const targetDate = new Date(lastDate.setFullYear(lastDate.getFullYear() + 1));
+                    const remainingDays = Math.ceil((targetDate - new Date()) / (1000 * 60 * 60 * 24));
+                    return { lastDate: lastRecord.date, targetDateStr: targetDate.toISOString().slice(0,10), remainingDays };
+                });
+                // ==========================================================
+
+                const currentVehicleName = computed(() => {
+                    const v = vehicles.value.find(c => c.id === currentVehicleId.value);
+                    return v ? v.name : '';
+                });
+
+                const filteredCategories = computed(() => {
+                    return categories.value.filter(c => c.type === form.recordType);
+                });
+
+                const requiresMileage = (categoryName) => {
+                    const cat = categories.value.find(c => c.name === categoryName);
+                    return cat ? cat.requireMileage : ['加油', '充电', '保养', '维修'].includes(categoryName);
+                };
+
+                watch(
+                    () => form.hev + form.ev,
+                    (newSum) => {
+                        if (newSum > 0 && form.categoryName && requiresMileage(form.categoryName)) {
+                            form.totalMileage = newSum;
+                        }
+                    }
+                );
+
+                const currentPage = ref(1);
+                const pageSize = ref(10);
+
+                const currentCategory = computed(() => categories.value.find(c => c.id === form.categoryId));
+
+                const paginatedRecords = computed(() => {
+                    const start = (currentPage.value - 1) * pageSize.value;
+                    return filteredTableRecords.value.slice(start, start + pageSize.value);
+                });
+
+                // =============== 初始化与持久化 ===============
+                const loadData = () => {
+                    const savedVehicles = localStorage.getItem('hev_vehicles');
+                    if (savedVehicles) vehicles.value = JSON.parse(savedVehicles);
+                    else vehicles.value = defaultVehicles;
+                    
+                    if (vehicles.value.length > 0) currentVehicleId.value = vehicles.value[0].id;
+
+                    const savedCats = localStorage.getItem('hev_categories');
+                    if (savedCats) {
+                        let parsedCats = JSON.parse(savedCats);
+                        parsedCats.forEach(c => {
+                            if (c.type === undefined) c.type = 'expense';
+                            if (c.requireMileage === undefined) c.requireMileage = ['加油', '充电', '保养', '维修'].includes(c.name);
+                        });
+                        const missingCats = [
+                            { name: '停车', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '高速费', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '洗车', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '购车/车贷', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '年检', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '顺风车', type: 'income', hasSub: false, subItems: [], requireMileage: false }
+                        ];
+                        missingCats.forEach(m => {
+                            if (!parsedCats.find(c => c.name === m.name)) {
+                                parsedCats.push({ id: 'cat_' + Date.now() + Math.random(), ...m, newSubInput: '' });
+                            }
+                        });
+                        categories.value = parsedCats;
+                    } else {
+                        categories.value = defaultCategories;
+                    }
+
+                    if (categories.value.length > 0) selectedChartCategory.value = categories.value[0].name;
+                    
+                    const savedRecords = localStorage.getItem('hev_records');
+                    if (savedRecords) {
+                        let parsedRecords = JSON.parse(savedRecords);
+                        parsedRecords.forEach(r => {
+                            if (!r.recordType) r.recordType = 'expense'; 
+                            if (!r.vehicleId) r.vehicleId = vehicles.value[0].id; 
+                        });
+                        records.value = parsedRecords;
+                        records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    }
+
+                    const savedSettings = localStorage.getItem('hev_app_settings');
+                    if (savedSettings) {
+                        const parsedSet = JSON.parse(savedSettings);
+                        if (parsedSet.maintKm === undefined) parsedSet.maintKm = 10000;
+                        if (parsedSet.maintMonths === undefined) parsedSet.maintMonths = 12;
+                        Object.assign(appSettings, parsedSet);
+                    }
+                };
+
+                const saveData = () => {
+                    localStorage.setItem('hev_vehicles', JSON.stringify(vehicles.value));
+                    localStorage.setItem('hev_categories', JSON.stringify(categories.value));
+                    localStorage.setItem('hev_records', JSON.stringify(records.value));
+                };
+
+                const saveSettings = () => {
+                    localStorage.setItem('hev_app_settings', JSON.stringify(appSettings));
+                    updateCharts();
+                };
+
+                const handleVehicleChange = () => {
+                    currentPage.value = 1; 
+                    nextTick(() => { updateCharts(); });
+                };
+
+                const addVehicle = () => {
+                    ElementPlus.ElMessageBox.prompt('请输入车辆名称', '新增车辆', { confirmButtonText: '确定', cancelButtonText: '取消' })
+                        .then(({ value }) => {
+                            if (value && value.trim() !== '') {
+                                vehicles.value.push({ id: 'v_' + Date.now(), name: value.trim() });
+                                saveData();
+                            }
+                        }).catch(() => {});
+                };
+
+                const editVehicle = (index) => {
+                    const v = vehicles.value[index];
+                    ElementPlus.ElMessageBox.prompt('请输入新的车辆名称', '编辑车辆', {
+                        confirmButtonText: '确定', cancelButtonText: '取消', inputValue: v.name
+                    }).then(({ value }) => {
+                        if (value && value.trim() !== '') {
+                            v.name = value.trim();
+                            saveData();
+                            ElementPlus.ElMessage.success('车辆名称已更新');
+                        }
+                    }).catch(() => {});
+                };
+
+                const deleteVehicle = (index) => { 
+                    const v = vehicles.value[index];
+                    ElementPlus.ElMessageBox.confirm(`确定删除车辆 "${v.name}" 吗？该车辆下的所有记录将被清空！`, '警告', { type: 'warning' })
+                        .then(() => {
+                            records.value = records.value.filter(r => r.vehicleId !== v.id); 
+                            vehicles.value.splice(index, 1); 
+                            if (currentVehicleId.value === v.id) {
+                                currentVehicleId.value = vehicles.value[0].id;
+                                handleVehicleChange();
+                            }
+                            saveData();
+                            ElementPlus.ElMessage.success('已删除车辆');
+                        }).catch(() => {});
+                };
+
+                const handleRecordTypeChange = () => {
+                    form.categoryId = ''; form.categoryName = ''; form.subCategory = ''; form.liters = 0;
+                };
+
+                const handleCategoryChange = (val) => {
+                    form.subCategory = '';
+                    const cat = categories.value.find(c => c.id === val);
+                    form.categoryName = cat ? cat.name : '';
+                    if(cat && cat.name !== '加油') form.liters = 0;
+                    
+                    if(cat && !cat.requireMileage) { form.hev = 0; form.ev = 0; form.totalMileage = 0; }
+                };
+
+                const saveRecord = () => {
+                    if (!form.date || !form.categoryId || !currentVehicleId.value) {
+                        ElementPlus.ElMessage.error('日期、记录类别和车辆归属为必填项！');
+                        return;
+                    }
+                    const newRecord = { ...form, id: Date.now().toString(), vehicleId: currentVehicleId.value };
+                    records.value.push(newRecord);
+                    records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    saveData();
+                    ElementPlus.ElMessage.success('记录保存成功！');
+                    updateCharts();
+                };
+
+                const deleteRecord = (id) => {
+                    records.value = records.value.filter(r => r.id !== id);
+                    saveData();
+                    ElementPlus.ElMessage.success('已删除记录');
+                    updateCharts();
+                };
+
+                const saveCategories = () => saveData();
+
+                const addCategory = (type) => {
+                    const titleName = type === 'income' ? '新增收入类别' : '新增支出类别';
+                    ElementPlus.ElMessageBox.prompt(`请输入${titleName}名称`, titleName, { confirmButtonText: '确定', cancelButtonText: '取消' })
+                        .then(({ value }) => {
+                            if (value && value.trim() !== '') {
+                                categories.value.push({ id: Date.now().toString(), name: value.trim(), type: type, hasSub: false, subItems: [], newSubInput: '', requireMileage: false });
+                                saveCategories();
+                            }
+                        }).catch(() => {});
+                };
+
+                const editCategory = (index) => {
+                    const cat = categories.value[index];
+                    const oldName = cat.name;
+                    ElementPlus.ElMessageBox.prompt('请输入新的类别名称', '编辑类别', {
+                        confirmButtonText: '确定', cancelButtonText: '取消', inputValue: cat.name
+                    }).then(({ value }) => {
+                        if (value && value.trim() !== '' && value.trim() !== oldName) {
+                            const newName = value.trim();
+                            cat.name = newName;
+                            records.value.forEach(r => { if (r.categoryId === cat.id) r.categoryName = newName; });
+                            if (selectedChartCategory.value === oldName) selectedChartCategory.value = newName;
+                            saveCategories(); 
+                            ElementPlus.ElMessage.success('类别名称已更新，历史数据已自动同步');
+                            updateCharts();
+                        }
+                    }).catch(() => {});
+                };
+
+                const deleteCategory = (index) => { categories.value.splice(index, 1); saveCategories(); };
+
+                const addSubItem = (row) => {
+                    if (row.newSubInput && !row.subItems.includes(row.newSubInput)) {
+                        row.subItems.push(row.newSubInput);
+                        row.newSubInput = '';
+                        saveCategories();
+                    }
+                };
+                const removeSubItem = (row, index) => { row.subItems.splice(index, 1); saveCategories(); };
+
+                // =============== 图表逻辑 ===============
+                let gasChart, evChart, costChart, totalEnergyChart, totalMileageChart, hevEvMileageChart;
+                let chartCategoryPie, chartCategoryTrend, chartEvRatio, chartSubCategoryPie; 
+
+                const initCharts = () => {
+                    if (document.getElementById('chartGas')) {
+                        gasChart = echarts.init(document.getElementById('chartGas'));
+                        evChart = echarts.init(document.getElementById('chartEv'));
+                        totalEnergyChart = echarts.init(document.getElementById('chartTotalEnergy'));
+                        costChart = echarts.init(document.getElementById('chartCost'));
+                        totalMileageChart = echarts.init(document.getElementById('chartTotalMileage'));
+                        hevEvMileageChart = echarts.init(document.getElementById('chartHevEvMileage'));
+                        chartEvRatio = echarts.init(document.getElementById('chartEvRatio'));
+                        
+                        chartCategoryPie = echarts.init(document.getElementById('chartCategoryPie'));
+                        if(document.getElementById('chartSubCategoryPie')) chartSubCategoryPie = echarts.init(document.getElementById('chartSubCategoryPie'));
+                        chartCategoryTrend = echarts.init(document.getElementById('chartCategoryTrend'));
+                        updateCharts();
+                    }
+                };
+
+                const getPeriodKey = (dateStr) => {
+                    if (chartPeriod.value === 'year') return dateStr.substring(0, 4) + '年';
+                    if (chartPeriod.value === 'halfyear') {
+                        const month = parseInt(dateStr.substring(5, 7));
+                        return dateStr.substring(0, 4) + (month <= 6 ? '年上半年' : '年下半年');
+                    }
+                    if (chartPeriod.value === 'quarter') {
+                        const month = parseInt(dateStr.substring(5, 7));
+                        return dateStr.substring(0, 4) + '年Q' + Math.ceil(month / 3);
+                    }
+                    return dateStr.substring(0, 7); 
+                };
+
+                const updateCharts = () => {
+                    if (!gasChart) return;
+
+                    // 时间尺度只决定“显示哪些周期”，不改变统计口径：
+                    // 综合费用 / 能耗 = 自购车起累计支出 ÷ 自购车起累计总里程（终身平均）
+                    const getWindowStart = () => {
+                        const now = new Date();
+                        if (chartPeriod.value === 'last3months') return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+                        if (chartPeriod.value === 'last6months') return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+                        return null;
+                    };
+                    const windowStart = getWindowStart();
+                    const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+                    // 聚合遍历全历史记录；分母为绝对总里程 stat.maxTotal，不做基线扣减
+                    const ascAllRecords = [...activeRecords.value].sort((a, b) => new Date(a.date) - new Date(b.date));
+                    // 时间窗只把窗前的周期挡在图表外，它们仍参与累计与差分
+                    const windowKey = windowStart ? getPeriodKey(fmtDate(windowStart)) : null;
+
+                    let gasDates = [], gasValues = [];
+                    let evDates = [], evValues = [];
+                    let costDates = [], costValues = [];
+                    let energyDates = [], energyValues = [];
+                    let mileageDates = [], totalMileageValues = [];
+                    let hevEvDates = [], hevValues = [], evValuesMileage = [];
+                    let ratioDates = [], ratioValues = [];
+
+                    const fuelMultiplier = appSettings.fuelUnit === 'L/百公里' ? 100 : 1;
+                    const costMultiplier = appSettings.costUnit === '元/百公里' ? 100 : 1;
+
+                    // 统一按周期（月 / 季度 / 半年 / 年）聚合展示走势图
+                    {
+                        // 【统一按周期聚合：遍历全历史记录，累计不随窗口重置】
+                        let periodData = {};
+                        let periods = [];
+                        
+                        ascAllRecords.forEach(r => {
+                            const p = getPeriodKey(r.date);
+                            if (!periodData[p]) {
+                                periodData[p] = { 
+                                    liters: 0, chargeAmt: 0, totalCost: 0, energyCost: 0,
+                                    maxHev: -1, maxEv: -1, maxTotal: -1,
+                                    minHev: -1, minEv: -1, minTotal: -1
+                                };
+                                periods.push(p);
+                            }
+                            
+                            const stat = periodData[p];
+                            const isMileageValid = requiresMileage(r.categoryName);
+                            const validMileage = !isMileageValid ? 0 : getMileage(r);
+                            
+                            stat.liters += (r.categoryName === '加油' ? (r.liters || 0) : 0);
+                            stat.chargeAmt += (r.categoryName === '充电' ? (r.recordType === 'income' ? 0 : r.amount) : 0);
+                            
+                            stat.totalCost += (r.recordType === 'income' ? -r.amount : r.amount);
+                            if (r.categoryName === '加油' || r.categoryName === '充电') {
+                                stat.energyCost += (r.recordType === 'income' ? 0 : r.amount);
+                            }
+
+                            if (validMileage > 0) {
+                                if (stat.maxTotal === -1 || validMileage > stat.maxTotal) stat.maxTotal = validMileage;
+                                if (stat.minTotal === -1 || validMileage < stat.minTotal) stat.minTotal = validMileage;
+                            }
+                            if (r.hev > 0 && isMileageValid) {
+                                if (stat.maxHev === -1 || r.hev > stat.maxHev) stat.maxHev = r.hev;
+                                if (stat.minHev === -1 || r.hev < stat.minHev) stat.minHev = r.hev;
+                            }
+                            if (r.ev > 0 && isMileageValid) {
+                                if (stat.maxEv === -1 || r.ev > stat.maxEv) stat.maxEv = r.ev;
+                                if (stat.minEv === -1 || r.ev < stat.minEv) stat.minEv = r.ev;
+                            }
+                        });
+
+                        periods = [...new Set(periods)].sort();
+                        
+                        let prevMaxHev = -1, prevMaxEv = -1;
+                        let cumulativeTotalCost = 0, cumulativeEnergyCost = 0;
+
+                        periods.forEach((p, index) => {
+                            const stat = periodData[p];
+                            cumulativeTotalCost += stat.totalCost;
+                            cumulativeEnergyCost += stat.energyCost;
+
+                            let hevDiff = 0, evDiff = 0;
+                            
+                            if (index === 0) {
+                                if (stat.maxHev > -1 && stat.minHev > -1) hevDiff = stat.maxHev - stat.minHev;
+                                if (stat.maxEv > -1 && stat.minEv > -1) evDiff = stat.maxEv - stat.minEv;
+                            } else {
+                                if (stat.maxHev > -1) hevDiff = stat.maxHev - (prevMaxHev > -1 ? prevMaxHev : stat.minHev);
+                                if (stat.maxEv > -1) evDiff = stat.maxEv - (prevMaxEv > -1 ? prevMaxEv : stat.minEv);
+                            }
+
+                            // 时间窗之前的周期只参与累计与差分，不进入图表；
+                            // 窗口首周期因此能拿到上一个周期的里程基准，油耗/电耗点不再缺失
+                            const inWindow = !windowKey || p >= windowKey;
+
+                            if (inWindow && hevDiff + evDiff > 0) {
+                                ratioDates.push(p);
+                                ratioValues.push(((evDiff / (hevDiff + evDiff)) * 100).toFixed(1));
+                            }
+
+                            if (inWindow && hevDiff > 0 && stat.liters > 0) {
+                                gasDates.push(p);
+                                gasValues.push(((stat.liters / hevDiff) * fuelMultiplier).toFixed(2));
+                            }
+                            if (inWindow && evDiff > 0 && stat.chargeAmt > 0) {
+                                evDates.push(p);
+                                evValues.push(((stat.chargeAmt / evDiff) * costMultiplier).toFixed(2));
+                            }
+                            // 分母为绝对总里程 stat.maxTotal，自购车起累计支出 ÷ 自购车起累计总里程
+                            if (inWindow && stat.maxTotal > 0) {
+                                costDates.push(p);
+                                costValues.push(((cumulativeTotalCost / stat.maxTotal) * costMultiplier).toFixed(2));
+                                energyDates.push(p);
+                                energyValues.push(((cumulativeEnergyCost / stat.maxTotal) * costMultiplier).toFixed(2));
+                                
+                                mileageDates.push(p);
+                                totalMileageValues.push(stat.maxTotal);
+                                hevEvDates.push(p);
+                                hevValues.push(stat.maxHev);
+                                evValuesMileage.push(stat.maxEv);
+                            }
+
+                            if (stat.maxHev > -1) prevMaxHev = stat.maxHev;
+                            if (stat.maxEv > -1) prevMaxEv = stat.maxEv;
+                        });
+                    }
+
+                    // 饼图 / 分类走势只展示时间窗内的记录；走势曲线的窗口裁剪已在聚合阶段由 windowKey 完成
+                    let rawRecordsForCategory = [...ascAllRecords];
+                    if (windowStart) {
+                        rawRecordsForCategory = rawRecordsForCategory.filter(r => new Date(r.date) >= windowStart);
+                    }
+
+                    // 2. 饼图排版优化：缩小半径，加入文本换行
+                    let pieDataMap = {};
+                    rawRecordsForCategory.forEach(r => {
+                        if (r.recordType !== 'income') {
+                            pieDataMap[r.categoryName] = (pieDataMap[r.categoryName] || 0) + r.amount;
+                        }
+                    });
+                    let pieData = Object.keys(pieDataMap).map(k => ({ name: k, value: pieDataMap[k].toFixed(2) }));
+
+                    let subCatMap = {};
+                    rawRecordsForCategory.forEach(r => {
+                        if (r.categoryName === selectedChartCategory.value && r.subCategory && r.recordType !== 'income') {
+                            subCatMap[r.subCategory] = (subCatMap[r.subCategory] || 0) + r.amount;
+                        }
+                    });
+                    let subCatData = Object.keys(subCatMap).map(k => ({ name: k, value: subCatMap[k].toFixed(2) }));
+
+                    // 3. 准备特定分类走势柱状图数据
+                    let catTrendMap = {};
+                    if (rawRecordsForCategory.length > 0) {
+                        let firstDate = new Date(rawRecordsForCategory[0].date);
+                        let lastDate = new Date(rawRecordsForCategory[rawRecordsForCategory.length - 1].date);
+                        
+                        let startYear = firstDate.getFullYear();
+                        let endYear = lastDate.getFullYear();
+                        
+                        if (chartPeriod.value === 'year') {
+                            for (let y = startYear; y <= endYear; y++) catTrendMap[y + '年'] = 0;
+                        } else if (chartPeriod.value === 'halfyear') {
+                            let startH = firstDate.getMonth() < 6 ? 1 : 2;
+                            let endH = lastDate.getMonth() < 6 ? 1 : 2;
+                            for (let y = startYear; y <= endYear; y++) {
+                                let hStart = (y === startYear) ? startH : 1;
+                                let hEnd = (y === endYear) ? endH : 2;
+                                for (let h = hStart; h <= hEnd; h++) {
+                                    catTrendMap[y + (h === 1 ? '年上半年' : '年下半年')] = 0;
+                                }
+                            }
+                        } else if (chartPeriod.value === 'quarter') {
+                            let startQ = Math.ceil((firstDate.getMonth() + 1) / 3);
+                            let endQ = Math.ceil((lastDate.getMonth() + 1) / 3);
+                            for (let y = startYear; y <= endYear; y++) {
+                                let qStart = (y === startYear) ? startQ : 1;
+                                let qEnd = (y === endYear) ? endQ : 4;
+                                for (let q = qStart; q <= qEnd; q++) catTrendMap[y + '年Q' + q] = 0;
+                            }
+                        } else {
+                            let startMonth = firstDate.getMonth();
+                            let endMonth = lastDate.getMonth();
+                            for (let y = startYear; y <= endYear; y++) {
+                                let mStart = (y === startYear) ? startMonth : 0;
+                                let mEnd = (y === endYear) ? endMonth : 11;
+                                for (let m = mStart; m <= mEnd; m++) {
+                                    let monthStr = y + '-' + String(m + 1).padStart(2, '0');
+                                    catTrendMap[monthStr] = 0;
+                                }
+                            }
+                        }
+                    }
+
+                    rawRecordsForCategory.forEach(r => {
+                        if (r.categoryName === selectedChartCategory.value) {
+                            let key;
+                            if (chartPeriod.value === 'year') {
+                                key = r.date.substring(0, 4) + '年';
+                            } else if (chartPeriod.value === 'halfyear') {
+                                let month = parseInt(r.date.substring(5, 7));
+                                key = r.date.substring(0, 4) + (month <= 6 ? '年上半年' : '年下半年');
+                            } else if (chartPeriod.value === 'quarter') {
+                                let month = parseInt(r.date.substring(5, 7));
+                                key = r.date.substring(0, 4) + '年Q' + Math.ceil(month / 3);
+                            } else {
+                                key = r.date.substring(0, 7); 
+                            }
+                            if (catTrendMap[key] !== undefined) {
+                                catTrendMap[key] += r.amount;
+                            } else {
+                                catTrendMap[key] = r.amount;
+                            }
+                        }
+                    });
+
+                    let catTrendDates = Object.keys(catTrendMap).sort((a, b) => a.localeCompare(b));
+                    let catTrendValues = catTrendDates.map(k => catTrendMap[k].toFixed(2));
+
+                    // ====== 渲染所有图表 ======
+                    const commonOptions = {
+                        tooltip: { trigger: 'axis' },
+                        grid: { left: '15%', right: '8%', bottom: '10%', top: '25%' },
+                        xAxis: { type: 'category', boundaryGap: false }
+                    };
+
+                    totalMileageChart.setOption({
+                        ...commonOptions,
+                        title: { text: '总里程变化 (km)', textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: mileageDates },
+                        yAxis: { type: 'value', min: 'dataMin' },
+                        series: [{ name: '总里程', type: 'line', data: totalMileageValues, smooth: true, color: '#3ba272', areaStyle: { opacity: 0.1 } }]
+                    });
+
+                    hevEvMileageChart.setOption({
+                        ...commonOptions,
+                        title: { text: 'HEV与EV里程变化 (km)', textStyle: { fontSize: 13 } },
+                        legend: { data: ['HEV里程', 'EV里程'], top: 0, right: 10, textStyle: { fontSize: 11 } },
+                        xAxis: { ...commonOptions.xAxis, data: hevEvDates },
+                        yAxis: { type: 'value', min: 'dataMin' },
+                        series: [
+                            { name: 'HEV里程', type: 'line', data: hevValues, smooth: true, color: '#ee6666' },
+                            { name: 'EV里程', type: 'line', data: evValuesMileage, smooth: true, color: '#5470c6' }
+                        ]
+                    });
+
+                    chartEvRatio.setOption({
+                        ...commonOptions,
+                        title: { text: '纯电比例 (EV Ratio %)', textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: ratioDates },
+                        yAxis: { type: 'value', max: 100 },
+                        series: [{ name: '纯电比例', type: 'line', data: ratioValues, smooth: true, color: '#91cc75', areaStyle: { opacity: 0.3 } }]
+                    });
+
+                    gasChart.setOption({
+                        ...commonOptions,
+                        title: { text: `馈电油耗 (${appSettings.fuelUnit})`, textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: gasDates },
+                        yAxis: { type: 'value', min: 'dataMin' },
+                        series: [{ name: '油耗', type: 'line', data: gasValues, smooth: true, color: '#ee6666' }]
+                    });
+
+                    evChart.setOption({
+                        ...commonOptions,
+                        title: { text: `区间电耗 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: evDates },
+                        yAxis: { type: 'value', min: 'dataMin' },
+                        series: [{ name: '电耗', type: 'line', data: evValues, smooth: true, color: '#5470c6' }]
+                    });
+
+                    totalEnergyChart.setOption({
+                        ...commonOptions,
+                        title: { text: `综合能耗曲线 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: energyDates },
+                        yAxis: { type: 'value', min: 'dataMin' },
+                        series: [{ name: '综合能耗', type: 'line', data: energyValues, smooth: true, color: '#fac858', areaStyle: { opacity: 0.2 } }]
+                    });
+
+                    costChart.setOption({
+                        ...commonOptions,
+                        title: { text: `综合净费用走势 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
+                        xAxis: { ...commonOptions.xAxis, data: costDates },
+                        yAxis: { type: 'value' },
+                        series: [{ name: '综合净费用', type: 'line', data: costValues, smooth: true, color: '#91cc75', areaStyle: { opacity: 0.2 } }]
+                    });
+
+                    chartCategoryPie.setOption({
+                        title: { text: '分类支出占比', textStyle: { fontSize: 13 }, left: 'center' },
+                        tooltip: { trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
+                        series: [{
+                            type: 'pie', radius: ['25%', '50%'], center: ['50%', '55%'],
+                            itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
+                            label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14 },
+                            data: pieData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                        }]
+                    });
+
+                    if (showSubCatPie.value) {
+                        if (!chartSubCategoryPie) chartSubCategoryPie = echarts.init(document.getElementById('chartSubCategoryPie'));
+                        chartSubCategoryPie.setOption({
+                            title: { text: `【${selectedChartCategory.value}】子项目占比`, textStyle: { fontSize: 13 }, left: 'center' },
+                            tooltip: { trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
+                            series: [{
+                                type: 'pie', radius: '50%', center: ['50%', '55%'],
+                                itemStyle: { borderRadius: 3, borderColor: '#fff', borderWidth: 2 },
+                                label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14 },
+                                data: subCatData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                            }]
+                        });
+                    }
+
+                    const curCatObj = categories.value.find(c => c.name === selectedChartCategory.value);
+                    const barColor = (curCatObj && curCatObj.type === 'income') ? '#91cc75' : '#73c0de';
+
+                    chartCategoryTrend.setOption({
+                        title: { text: `【${selectedChartCategory.value || '-'}】金额走势`, textStyle: { fontSize: 13 } },
+                        tooltip: { trigger: 'axis' },
+                        grid: { left: '15%', right: '8%', bottom: '10%', top: '25%' },
+                        xAxis: { type: 'category', data: catTrendDates, axisLabel: { interval: 'auto', rotate: 30 } },
+                        yAxis: { type: 'value' },
+                        series: [{ name: '金额(元)', type: 'bar', data: catTrendValues, color: barColor, barMaxWidth: 40 }]
+                    });
+
+                    nextTick(() => {
+                        if (chartCategoryTrend) chartCategoryTrend.resize();
+                        if (showSubCatPie.value && chartSubCategoryPie) chartSubCategoryPie.resize();
+                    });
+                };
+
+                const handleTabClick = (tab) => {
+                    if (tab.paneName === 'home') {
+                        nextTick(() => { updateCharts(); });
+                    }
+                };
+
+                const exportData = () => {
+                    const data = { vehicles: vehicles.value, categories: categories.value, records: records.value, settings: appSettings };
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `混动车记账备份_${new Date().toISOString().slice(0,10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                const exportCSV = () => {
+                    let csvContent = "\uFEFF"; 
+                    csvContent += "车辆名称,日期,收支类型,一级类别,具体项目,金额(元),总里程(km),HEV里程(km),EV里程(km),备注升数(L)\n";
+                    
+                    const vMap = {};
+                    vehicles.value.forEach(v => vMap[v.id] = v.name);
+
+                    records.value.forEach(r => {
+                        const vName = vMap[r.vehicleId] || '未知车辆';
+                        const rType = r.recordType === 'income' ? '收入' : '支出';
+                        const subCat = r.subCategory || '';
+                        const totalM = r.totalMileage || (r.hev + r.ev) || '';
+                        const hev = r.hev || '';
+                        const ev = r.ev || '';
+                        const liters = r.liters || '';
+                        
+                        csvContent += `"${vName}","${r.date}","${rType}","${r.categoryName}","${subCat}",${r.amount},${totalM},${hev},${ev},${liters}\n`;
+                    });
+
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `混动车记账数据导出_${new Date().toISOString().slice(0,10)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                const triggerFileInput = () => { document.getElementById('fileInput').click(); };
+
+                const importData = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if (data.categories && data.records) {
+                                if (data.vehicles) vehicles.value = data.vehicles;
+                                else vehicles.value = defaultVehicles;
+                                
+                                categories.value = data.categories;
+                                records.value = data.records;
+                                if (data.settings) Object.assign(appSettings, data.settings);
+                                
+                                currentVehicleId.value = vehicles.value[0].id;
+                                saveData();
+                                saveSettings();
+                                ElementPlus.ElMessage.success('数据恢复成功！');
+                                updateCharts();
+                            } else {
+                                throw new Error('数据格式不匹配');
+                            }
+                        } catch (err) {
+                            ElementPlus.ElMessage.error('导入失败：不是有效的备份文件');
+                        }
+                    };
+                    reader.readAsText(file);
+                    event.target.value = ''; 
+                };
+
+                onMounted(() => {
+                    loadData();
+                    nextTick(() => { initCharts(); });
+                    
+                    window.addEventListener('resize', () => {
+                        if(gasChart) gasChart.resize();
+                        if(evChart) evChart.resize();
+                        if(totalEnergyChart) totalEnergyChart.resize();
+                        if(costChart) costChart.resize();
+                        if(totalMileageChart) totalMileageChart.resize();
+                        if(hevEvMileageChart) hevEvMileageChart.resize();
+                        if(chartEvRatio) chartEvRatio.resize();
+                        if(chartCategoryPie) chartCategoryPie.resize();
+                        if(chartSubCategoryPie && showSubCatPie.value) chartSubCategoryPie.resize();
+                        if(chartCategoryTrend) chartCategoryTrend.resize();
+                    });
+                });
+
+                return {
+                    activeTab, chartPeriod, selectedChartCategory, activeVersionLog, appSettings, 
+                    vehicles, currentVehicleId, currentVehicleName, handleVehicleChange, addVehicle, editVehicle, deleteVehicle,
+                    categories, records, activeRecords, form, currentCategory, paginatedRecords,
+                    filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie,
+                    tableFilter, filteredTableRecords, tableStats, maintenanceInfo, insuranceInfo, inspectionInfo,
+                    handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
+                    saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem, saveSettings,
+                    exportData, exportCSV, triggerFileInput, importData, handleTabClick, updateCharts
+                };
+            }
+        });
+
+        app.use(ElementPlus);
+        app.mount('#app');
+    </script>
+</body>
+</html>
