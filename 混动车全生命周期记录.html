@@ -9,10 +9,27 @@
     <style>
         body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; }
         #app { max-width: 1300px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1); }
-        .chart-container { height: 230px; width: 100%; margin-bottom: 15px; }
+        .chart-container { height: 230px; width: 100%; margin-bottom: 0; }
+        .chart-row > .el-col { margin-bottom: 16px; }
         .el-form-item { margin-bottom: 18px; }
         .version-tag { font-size: 14px; color: #909399; margin-left: 15px; font-weight: normal; }
-        .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ebeef5; }
+        .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ebeef5; flex-wrap: wrap; gap: 10px; }
+        /* 图表响应式：按屏幕宽度统一缩放画布高度，窄屏时单列堆叠 */
+        @media (max-width: 1200px) {
+            #app { padding: 16px; }
+            .chart-container { height: 220px; }
+        }
+        @media (max-width: 992px) {
+            .chart-container { height: 210px; }
+        }
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            #app { padding: 12px; border-radius: 6px; }
+            .chart-container { height: 200px; }
+        }
+        @media (max-width: 480px) {
+            .chart-container { height: 180px; }
+        }
         .log-list { padding-left: 20px; color: #606266; font-size: 14px; line-height: 1.8; margin-top: 5px; }
         
         /* 管家卡片样式 */
@@ -146,32 +163,31 @@
                             </el-radio-group>
                         </div>
                         
-                        <!-- 第 1 行: 里程变化 & 纯电比例 -->
-                        <el-row :gutter="10">
-                            <el-col :span="8"><div id="chartTotalMileage" class="chart-container"></div></el-col>
-                            <el-col :span="8"><div id="chartHevEvMileage" class="chart-container"></div></el-col>
-                            <el-col :span="8"><div id="chartEvRatio" class="chart-container"></div></el-col>
+                        <!-- 第 1 行: 里程总览（总里程 + HEV/EV 分项）& 纯电比例 -->
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="14" :xs="24" :sm="24" :md="14"><div id="chartMileage" class="chart-container"></div></el-col>
+                            <el-col :span="10" :xs="24" :sm="24" :md="10"><div id="chartEvRatio" class="chart-container"></div></el-col>
                         </el-row>
                         
                         <!-- 第 2 行: 能耗效率 -->
-                        <el-row :gutter="10">
-                            <el-col :span="8"><div id="chartGas" class="chart-container"></div></el-col>
-                            <el-col :span="8"><div id="chartEv" class="chart-container"></div></el-col>
-                            <el-col :span="8"><div id="chartTotalEnergy" class="chart-container"></div></el-col>
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartGas" class="chart-container"></div></el-col>
+                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartEv" class="chart-container"></div></el-col>
+                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartTotalEnergy" class="chart-container"></div></el-col>
                         </el-row>
                         
                         <!-- 第 3 行: 各分类占比 & 综合净费用走势 (比例 10:14) -->
-                        <el-row :gutter="10">
-                            <el-col :span="10"><div id="chartCategoryPie" class="chart-container"></div></el-col>
-                            <el-col :span="14"><div id="chartCost" class="chart-container"></div></el-col>
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="10" :xs="24" :sm="24" :md="10"><div id="chartCategoryPie" class="chart-container"></div></el-col>
+                            <el-col :span="14" :xs="24" :sm="24" :md="14"><div id="chartCost" class="chart-container"></div></el-col>
                         </el-row>
 
                         <!-- 第 4 行: 子项目饼图 & 特定分类趋势 (比例 10:14) -->
-                        <el-row :gutter="10">
-                            <el-col :span="10" v-show="showSubCatPie">
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="10" :xs="24" :sm="24" :md="10" v-show="showSubCatPie">
                                 <div id="chartSubCategoryPie" class="chart-container"></div>
                             </el-col>
-                            <el-col :span="showSubCatPie ? 14 : 24">
+                            <el-col :span="showSubCatPie ? 14 : 24" :xs="24" :sm="24" :md="showSubCatPie ? 14 : 24">
                                 <div style="position: relative;">
                                     <div style="position: absolute; top: 0px; right: 10px; z-index: 10;">
                                         <el-select v-model="selectedChartCategory" size="small" style="width: 110px;" @change="updateCharts" placeholder="选择分类">
@@ -305,6 +321,9 @@
                     <el-form-item label="保养提醒间隔(月)">
                         <el-input-number v-model="appSettings.maintMonths" :min="1" :step="1" @change="saveSettings"></el-input-number>
                     </el-form-item>
+                    <el-form-item label="CS折算系数 η">
+                        <el-input-number v-model="appSettings.csDuty" :min="0.3" :max="0.8" :step="0.05" :precision="2" @change="saveSettings"></el-input-number>
+                    </el-form-item>
                 </el-form>
 
                 <el-divider></el-divider>
@@ -382,7 +401,15 @@
                 <!-- 更新日志 -->
                 <h3>版本与更新日志</h3>
                 <el-collapse v-model="activeVersionLog">
-                    <el-collapse-item title="版本：2026.09.01 (当前版本)" name="2026.09.01">
+                    <el-collapse-item title="版本：20261114001 (当前版本)" name="20261114001">
+                        <ul class="log-list">
+                            <li><strong>油耗口径修正：</strong>按 GB/T 19753 标准补齐“综合油耗 / 燃油行驶段油耗 / 馈电油耗(CS折算)”三指标，新增可标定的 CS 运转占比 η，双 Y 轴对比并标注官方 WLTC 参考线。</li>
+                            <li><strong>图表合并：</strong>原“总里程变化”与“HEV与EV里程变化”合并为“里程总览”，左轴总里程、右轴 HEV/EV 分项，信息不丢失。</li>
+                            <li><strong>布局优化：</strong>统一图表间距与卡片高度，加入窄屏单列堆叠与自适应高度，避免重叠错位。</li>
+                            <li><strong>口径统一：</strong>综合费用/能耗统一为“自购车起累计支出 ÷ 自购车起累计总里程”，时间尺度只控制显示周期。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：2026.09.01" name="2026.09.01">
                         <ul class="log-list">
                             <li><strong>字典规范化：</strong>重构并固化了全部默认一二级支出/收入类目（移除旧“高速”，统一为“高速费”等），并严格绑定各自的里程与二级菜单规则。</li>
                             <li><strong>多维时间窗：</strong>图表分析区新增“近半年”与“半年（自然半年）”尺度选择，补齐中长期数据洞察能力。</li>
@@ -432,13 +459,14 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('all'); 
                 const selectedChartCategory = ref(''); 
-                const activeVersionLog = ref(['2026.09.01']); 
+                const activeVersionLog = ref(['20261114001']); 
                 
                 const appSettings = reactive({
                     costUnit: '元/百公里',
                     fuelUnit: 'L/百公里',
                     maintKm: 10000,
-                    maintMonths: 12
+                    maintMonths: 12,
+                    csDuty: 0.50
                 });
 
                 const vehicles = ref([]);
@@ -634,6 +662,7 @@
                         const parsedSet = JSON.parse(savedSettings);
                         if (parsedSet.maintKm === undefined) parsedSet.maintKm = 10000;
                         if (parsedSet.maintMonths === undefined) parsedSet.maintMonths = 12;
+                        if (parsedSet.csDuty === undefined) parsedSet.csDuty = 0.50;
                         Object.assign(appSettings, parsedSet);
                     }
                 };
@@ -768,7 +797,7 @@
                 const removeSubItem = (row, index) => { row.subItems.splice(index, 1); saveCategories(); };
 
                 // =============== 图表逻辑 ===============
-                let gasChart, evChart, costChart, totalEnergyChart, totalMileageChart, hevEvMileageChart;
+                let gasChart, evChart, costChart, totalEnergyChart, mileageChart;
                 let chartCategoryPie, chartCategoryTrend, chartEvRatio, chartSubCategoryPie; 
 
                 const initCharts = () => {
@@ -777,8 +806,7 @@
                         evChart = echarts.init(document.getElementById('chartEv'));
                         totalEnergyChart = echarts.init(document.getElementById('chartTotalEnergy'));
                         costChart = echarts.init(document.getElementById('chartCost'));
-                        totalMileageChart = echarts.init(document.getElementById('chartTotalMileage'));
-                        hevEvMileageChart = echarts.init(document.getElementById('chartHevEvMileage'));
+                        mileageChart = echarts.init(document.getElementById('chartMileage'));
                         chartEvRatio = echarts.init(document.getElementById('chartEvRatio'));
                         
                         chartCategoryPie = echarts.init(document.getElementById('chartCategoryPie'));
@@ -820,12 +848,12 @@
                     // 时间窗只把窗前的周期挡在图表外，它们仍参与累计与差分
                     const windowKey = windowStart ? getPeriodKey(fmtDate(windowStart)) : null;
 
-                    let gasDates = [], gasValues = [];
+                    let gasDates = [], gasValues = [], gasTotalValues = [], csValues = [];
                     let evDates = [], evValues = [];
                     let costDates = [], costValues = [];
                     let energyDates = [], energyValues = [];
                     let mileageDates = [], totalMileageValues = [];
-                    let hevEvDates = [], hevValues = [], evValuesMileage = [];
+                    let hevValues = [], evValuesMileage = [];
                     let ratioDates = [], ratioValues = [];
 
                     const fuelMultiplier = appSettings.fuelUnit === 'L/百公里' ? 100 : 1;
@@ -876,7 +904,7 @@
 
                         periods = [...new Set(periods)].sort();
                         
-                        let prevMaxHev = -1, prevMaxEv = -1;
+                        let prevMaxHev = -1, prevMaxEv = -1, prevMaxTotal = -1;
                         let cumulativeTotalCost = 0, cumulativeEnergyCost = 0;
 
                         periods.forEach((p, index) => {
@@ -884,14 +912,16 @@
                             cumulativeTotalCost += stat.totalCost;
                             cumulativeEnergyCost += stat.energyCost;
 
-                            let hevDiff = 0, evDiff = 0;
+                            let hevDiff = 0, evDiff = 0, totalDiff = 0;
                             
                             if (index === 0) {
                                 if (stat.maxHev > -1 && stat.minHev > -1) hevDiff = stat.maxHev - stat.minHev;
                                 if (stat.maxEv > -1 && stat.minEv > -1) evDiff = stat.maxEv - stat.minEv;
+                                if (stat.maxTotal > -1 && stat.minTotal > -1) totalDiff = stat.maxTotal - stat.minTotal;
                             } else {
                                 if (stat.maxHev > -1) hevDiff = stat.maxHev - (prevMaxHev > -1 ? prevMaxHev : stat.minHev);
                                 if (stat.maxEv > -1) evDiff = stat.maxEv - (prevMaxEv > -1 ? prevMaxEv : stat.minEv);
+                                if (stat.maxTotal > -1) totalDiff = stat.maxTotal - (prevMaxTotal > -1 ? prevMaxTotal : stat.minTotal);
                             }
 
                             // 时间窗之前的周期只参与累计与差分，不进入图表；
@@ -904,8 +934,16 @@
                             }
 
                             if (inWindow && hevDiff > 0 && stat.liters > 0) {
+                                // 标准口径拆分：
+                                // 1) 综合油耗 = 燃油量 ÷ 行驶总里程（GB/T 19753 综合燃料消耗量）
+                                // 2) 燃油行驶段油耗 = 燃油量 ÷ HEV 里程（辅助指标，非馈电油耗）
+                                // 3) 馈电油耗(CS折算) = 燃油行驶段油耗 × CS 发动机运转里程占比 η
+                                const segFuel = (stat.liters / hevDiff) * fuelMultiplier;
+                                const csDuty = Number(appSettings.csDuty) || 0.50;
                                 gasDates.push(p);
-                                gasValues.push(((stat.liters / hevDiff) * fuelMultiplier).toFixed(2));
+                                gasValues.push(segFuel.toFixed(2));
+                                csValues.push((segFuel * csDuty).toFixed(2));
+                                gasTotalValues.push(totalDiff > 0 ? ((stat.liters / totalDiff) * fuelMultiplier).toFixed(2) : null);
                             }
                             if (inWindow && evDiff > 0 && stat.chargeAmt > 0) {
                                 evDates.push(p);
@@ -920,13 +958,13 @@
                                 
                                 mileageDates.push(p);
                                 totalMileageValues.push(stat.maxTotal);
-                                hevEvDates.push(p);
                                 hevValues.push(stat.maxHev);
                                 evValuesMileage.push(stat.maxEv);
                             }
 
                             if (stat.maxHev > -1) prevMaxHev = stat.maxHev;
                             if (stat.maxEv > -1) prevMaxEv = stat.maxEv;
+                            if (stat.maxTotal > -1) prevMaxTotal = stat.maxTotal;
                         });
                     }
 
@@ -1028,23 +1066,22 @@
                         xAxis: { type: 'category', boundaryGap: false }
                     };
 
-                    totalMileageChart.setOption({
-                        ...commonOptions,
-                        title: { text: '总里程变化 (km)', textStyle: { fontSize: 13 } },
-                        xAxis: { ...commonOptions.xAxis, data: mileageDates },
-                        yAxis: { type: 'value', min: 'dataMin' },
-                        series: [{ name: '总里程', type: 'line', data: totalMileageValues, smooth: true, color: '#3ba272', areaStyle: { opacity: 0.1 } }]
-                    });
-
-                    hevEvMileageChart.setOption({
-                        ...commonOptions,
-                        title: { text: 'HEV与EV里程变化 (km)', textStyle: { fontSize: 13 } },
-                        legend: { data: ['HEV里程', 'EV里程'], top: 0, right: 10, textStyle: { fontSize: 11 } },
-                        xAxis: { ...commonOptions.xAxis, data: hevEvDates },
-                        yAxis: { type: 'value', min: 'dataMin' },
+                    // 里程总览：合并原“总里程变化”与“HEV与EV里程变化”
+                    // 左轴=累计总里程（面积线），右轴=HEV/EV 分项里程，保留两组核心维度
+                    mileageChart.setOption({
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+                        legend: { data: ['总里程', 'HEV里程', 'EV里程'], top: 0, right: 0, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 10 } },
+                        grid: { left: '12%', right: '12%', bottom: '12%', top: '30%' },
+                        title: { text: '里程总览 (km)', textStyle: { fontSize: 13 } },
+                        xAxis: { type: 'category', boundaryGap: false, data: mileageDates },
+                        yAxis: [
+                            { type: 'value', name: '总里程', nameTextStyle: { fontSize: 10 }, scale: true, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed' } } },
+                            { type: 'value', name: 'HEV/EV', nameTextStyle: { fontSize: 10 }, scale: true, axisLabel: { fontSize: 10 }, splitLine: { show: false } }
+                        ],
                         series: [
-                            { name: 'HEV里程', type: 'line', data: hevValues, smooth: true, color: '#ee6666' },
-                            { name: 'EV里程', type: 'line', data: evValuesMileage, smooth: true, color: '#5470c6' }
+                            { name: '总里程', type: 'line', data: totalMileageValues, smooth: true, color: '#3ba272', areaStyle: { opacity: 0.12 }, yAxisIndex: 0 },
+                            { name: 'HEV里程', type: 'line', data: hevValues, smooth: true, color: '#ee6666', yAxisIndex: 1 },
+                            { name: 'EV里程', type: 'line', data: evValuesMileage, smooth: true, color: '#5470c6', yAxisIndex: 1 }
                         ]
                     });
 
@@ -1057,11 +1094,27 @@
                     });
 
                     gasChart.setOption({
-                        ...commonOptions,
-                        title: { text: `馈电油耗 (${appSettings.fuelUnit})`, textStyle: { fontSize: 13 } },
+                        tooltip: { trigger: 'axis' },
+                        legend: { data: ['综合油耗', '燃油行驶段油耗', '馈电油耗(CS折算)'], top: 0, right: 0, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 10 } },
+                        grid: { left: '15%', right: '14%', bottom: '12%', top: '32%' },
+                        title: {
+                            text: `油耗分析 (${appSettings.fuelUnit})`,
+                            subtext: `CS折算系数 η=${(Number(appSettings.csDuty) || 0.50).toFixed(2)}`,
+                            textStyle: { fontSize: 13 },
+                            subtextStyle: { fontSize: 10, color: '#909399' }
+                        },
                         xAxis: { ...commonOptions.xAxis, data: gasDates },
-                        yAxis: { type: 'value', min: 'dataMin' },
-                        series: [{ name: '油耗', type: 'line', data: gasValues, smooth: true, color: '#ee6666' }]
+                        yAxis: [
+                            { type: 'value', name: '综合', nameTextStyle: { fontSize: 10 }, min: 'dataMin', axisLabel: { fontSize: 10 } },
+                            { type: 'value', name: '段/CS', nameTextStyle: { fontSize: 10 }, splitLine: { show: false }, axisLabel: { fontSize: 10 } }
+                        ],
+                        series: [
+                            { name: '综合油耗', type: 'line', data: gasTotalValues, smooth: true, color: '#5470c6' },
+                            { name: '燃油行驶段油耗', type: 'line', data: gasValues, smooth: true, color: '#ee6666', yAxisIndex: 1 },
+                            { name: '馈电油耗(CS折算)', type: 'line', data: csValues, smooth: true, color: '#91cc75', yAxisIndex: 1,
+                              lineStyle: { type: 'dashed' },
+                              markLine: { silent: true, symbol: 'none', data: [{ yAxis: appSettings.fuelUnit === 'L/百公里' ? 5.3 : 0.053, label: { formatter: '官方WLTC', fontSize: 9 }, lineStyle: { color: '#c0c4cc', type: 'dotted' } }] } }
+                        ]
                     });
 
                     evChart.setOption({
@@ -1218,8 +1271,7 @@
                         if(evChart) evChart.resize();
                         if(totalEnergyChart) totalEnergyChart.resize();
                         if(costChart) costChart.resize();
-                        if(totalMileageChart) totalMileageChart.resize();
-                        if(hevEvMileageChart) hevEvMileageChart.resize();
+                        if(mileageChart) mileageChart.resize();
                         if(chartEvRatio) chartEvRatio.resize();
                         if(chartCategoryPie) chartCategoryPie.resize();
                         if(chartSubCategoryPie && showSubCatPie.value) chartSubCategoryPie.resize();
