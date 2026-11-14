@@ -116,7 +116,10 @@
                             </el-form-item>
 
                             <el-form-item v-if="currentCategory && currentCategory.hasSub" label="具体项目">
-                                <el-select v-model="form.subCategory" placeholder="请选择二级项目" style="width: 100%;">
+                                <el-select v-if="currentCategory.name === '保养'" v-model="form.subCategoryList" multiple collapse-tags placeholder="可多选保养项目" style="width: 100%;">
+                                    <el-option v-for="sub in currentCategory.subItems" :key="sub" :label="sub" :value="sub"></el-option>
+                                </el-select>
+                                <el-select v-else v-model="form.subCategory" placeholder="请选择二级项目" style="width: 100%;">
                                     <el-option v-for="sub in currentCategory.subItems" :key="sub" :label="sub" :value="sub"></el-option>
                                 </el-select>
                             </el-form-item>
@@ -154,40 +157,36 @@
                         <div class="chart-header">
                             <span style="font-weight: bold; font-size: 16px;">数据分析图表 ({{ currentVehicleName }})</span>
                             <el-radio-group v-model="chartPeriod" @change="updateCharts" size="small">
-                                <el-radio-button label="all">全部</el-radio-button>
-                                <el-radio-button label="last3months">近3月</el-radio-button>
-                                <el-radio-button label="last6months">近半年</el-radio-button>
-                                <el-radio-button label="quarter">季度</el-radio-button>
-                                <el-radio-button label="halfyear">半年</el-radio-button>
                                 <el-radio-button label="year">年</el-radio-button>
+                                <el-radio-button label="quarter">季度</el-radio-button>
+                                <el-radio-button label="last12months">近一年</el-radio-button>
+                                <el-radio-button label="last6months">近半年</el-radio-button>
                             </el-radio-group>
                         </div>
                         
-                        <!-- 第 1 行: 里程总览（总里程 + HEV/EV 分项）& 纯电比例 -->
+                        <!-- 四行两列标准网格 -->
+                        <!-- 第 1 行: 里程总览 & 综合净费用走势 -->
                         <el-row :gutter="16" class="chart-row">
-                            <el-col :span="14" :xs="24" :sm="24" :md="14"><div id="chartMileage" class="chart-container"></div></el-col>
-                            <el-col :span="10" :xs="24" :sm="24" :md="10"><div id="chartEvRatio" class="chart-container"></div></el-col>
-                        </el-row>
-                        
-                        <!-- 第 2 行: 能耗效率 -->
-                        <el-row :gutter="16" class="chart-row">
-                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartGas" class="chart-container"></div></el-col>
-                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartEv" class="chart-container"></div></el-col>
-                            <el-col :span="8" :xs="24" :sm="24" :md="8"><div id="chartTotalEnergy" class="chart-container"></div></el-col>
-                        </el-row>
-                        
-                        <!-- 第 3 行: 各分类占比 & 综合净费用走势 (比例 10:14) -->
-                        <el-row :gutter="16" class="chart-row">
-                            <el-col :span="10" :xs="24" :sm="24" :md="10"><div id="chartCategoryPie" class="chart-container"></div></el-col>
-                            <el-col :span="14" :xs="24" :sm="24" :md="14"><div id="chartCost" class="chart-container"></div></el-col>
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartMileage" class="chart-container"></div></el-col>
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartCost" class="chart-container"></div></el-col>
                         </el-row>
 
-                        <!-- 第 4 行: 子项目饼图 & 特定分类趋势 (比例 10:14) -->
+                        <!-- 第 2 行: 纯电比例 & 综合能耗曲线 -->
                         <el-row :gutter="16" class="chart-row">
-                            <el-col :span="10" :xs="24" :sm="24" :md="10" v-show="showSubCatPie">
-                                <div id="chartSubCategoryPie" class="chart-container"></div>
-                            </el-col>
-                            <el-col :span="showSubCatPie ? 14 : 24" :xs="24" :sm="24" :md="showSubCatPie ? 14 : 24">
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartEvRatio" class="chart-container"></div></el-col>
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartTotalEnergy" class="chart-container"></div></el-col>
+                        </el-row>
+
+                        <!-- 第 3 行: 区间电耗 & 油耗分析 -->
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartEv" class="chart-container"></div></el-col>
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartGas" class="chart-container"></div></el-col>
+                        </el-row>
+
+                        <!-- 第 4 行: 分类支出占比 & 金额走势 -->
+                        <el-row :gutter="16" class="chart-row">
+                            <el-col :span="12" :xs="24" :sm="24" :md="12"><div id="chartCategoryPie" class="chart-container"></div></el-col>
+                            <el-col :span="12" :xs="24" :sm="24" :md="12">
                                 <div style="position: relative;">
                                     <div style="position: absolute; top: 0px; right: 10px; z-index: 10;">
                                         <el-select v-model="selectedChartCategory" size="small" style="width: 110px;" @change="updateCharts" placeholder="选择分类">
@@ -196,6 +195,13 @@
                                     </div>
                                     <div id="chartCategoryTrend" class="chart-container"></div>
                                 </div>
+                            </el-col>
+                        </el-row>
+
+                        <!-- 辅助: 子项目占比（保留原有条件展示能力） -->
+                        <el-row :gutter="16" class="chart-row" v-show="showSubCatPie">
+                            <el-col :span="12" :xs="24" :sm="24" :md="12">
+                                <div id="chartSubCategoryPie" class="chart-container"></div>
                             </el-col>
                         </el-row>
 
@@ -401,7 +407,21 @@
                 <!-- 更新日志 -->
                 <h3>版本与更新日志</h3>
                 <el-collapse v-model="activeVersionLog">
-                    <el-collapse-item title="版本：20261114001 (当前版本)" name="20261114001">
+                    <el-collapse-item title="版本：20261114003 (当前版本)" name="20261114003">
+                        <ul class="log-list">
+                            <li><strong>图表网格：</strong>调整为四行两列标准布局，依次为 里程总览/综合净费用走势、纯电比例/综合能耗曲线、区间电耗/油耗分析、分类支出占比/金额走势；子项目占比保留为条件展示。</li>
+                            <li><strong>保养多选：</strong>保养具体项目由单选改为多选，保存时合并为顿号分隔字符串，记录结构与历史数据兼容。</li>
+                            <li><strong>版本控制：</strong>新增 .gitignore，忽略所有备份数据 JSON。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：20261114002" name="20261114002">
+                        <ul class="log-list">
+                            <li><strong>看板布局：</strong>主图表改为两行网格，第一行「里程总览 + 综合能耗曲线」等宽，第二行「纯电比例 + 区间电耗 + 油耗分析」三等分；其余分析图表保留在下方。</li>
+                            <li><strong>时间尺度：</strong>筛选器调整为 全部 / 年 / 季度 / 近一年 / 近半年，默认「全部」；年=今年、季度=本季度，全部趋势图统一按自然月聚合。</li>
+                            <li><strong>联动与响应式：</strong>切换尺度时全部图表同步刷新；小屏单列堆叠，顺序为里程、综合能耗、纯电比例、区间电耗、油耗分析。</li>
+                        </ul>
+                    </el-collapse-item>
+                    <el-collapse-item title="版本：20261114001" name="20261114001">
                         <ul class="log-list">
                             <li><strong>油耗口径修正：</strong>按 GB/T 19753 标准补齐“综合油耗 / 燃油行驶段油耗 / 馈电油耗(CS折算)”三指标，新增可标定的 CS 运转占比 η，双 Y 轴对比并标注官方 WLTC 参考线。</li>
                             <li><strong>图表合并：</strong>原“总里程变化”与“HEV与EV里程变化”合并为“里程总览”，左轴总里程、右轴 HEV/EV 分项，信息不丢失。</li>
@@ -457,9 +477,9 @@
             setup() {
                 // =============== 数据状态 ===============
                 const activeTab = ref('home');
-                const chartPeriod = ref('all'); 
+                const chartPeriod = ref('year'); 
                 const selectedChartCategory = ref(''); 
-                const activeVersionLog = ref(['20261114001']); 
+                const activeVersionLog = ref(['20261114003']); 
                 
                 const appSettings = reactive({
                     costUnit: '元/百公里',
@@ -495,7 +515,7 @@
                 const records = ref([]);
                 
                 const form = reactive({
-                    id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '',
+                    id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '', subCategoryList: [],
                     amount: 0, hev: 0, ev: 0, liters: 0, totalMileage: 0
                 });
 
@@ -722,11 +742,12 @@
                 };
 
                 const handleRecordTypeChange = () => {
-                    form.categoryId = ''; form.categoryName = ''; form.subCategory = ''; form.liters = 0;
+                    form.categoryId = ''; form.categoryName = ''; form.subCategory = ''; form.subCategoryList = []; form.liters = 0;
                 };
 
                 const handleCategoryChange = (val) => {
                     form.subCategory = '';
+                    form.subCategoryList = [];
                     const cat = categories.value.find(c => c.id === val);
                     form.categoryName = cat ? cat.name : '';
                     if(cat && cat.name !== '加油') form.liters = 0;
@@ -739,7 +760,12 @@
                         ElementPlus.ElMessage.error('日期、记录类别和车辆归属为必填项！');
                         return;
                     }
+                    // 保养项目支持多选：保存时合并为字符串，保持原有记录结构与图表分组规则
+                    if (form.categoryName === '保养') {
+                        form.subCategory = (form.subCategoryList || []).join('、');
+                    }
                     const newRecord = { ...form, id: Date.now().toString(), vehicleId: currentVehicleId.value };
+                    delete newRecord.subCategoryList;
                     records.value.push(newRecord);
                     records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
                     saveData();
@@ -817,16 +843,8 @@
                 };
 
                 const getPeriodKey = (dateStr) => {
-                    if (chartPeriod.value === 'year') return dateStr.substring(0, 4) + '年';
-                    if (chartPeriod.value === 'halfyear') {
-                        const month = parseInt(dateStr.substring(5, 7));
-                        return dateStr.substring(0, 4) + (month <= 6 ? '年上半年' : '年下半年');
-                    }
-                    if (chartPeriod.value === 'quarter') {
-                        const month = parseInt(dateStr.substring(5, 7));
-                        return dateStr.substring(0, 4) + '年Q' + Math.ceil(month / 3);
-                    }
-                    return dateStr.substring(0, 7); 
+                    // 所有时间尺度统一按自然月聚合，仅时间窗范围不同
+                    return dateStr.substring(0, 7);
                 };
 
                 const updateCharts = () => {
@@ -836,8 +854,10 @@
                     // 综合费用 / 能耗 = 自购车起累计支出 ÷ 自购车起累计总里程（终身平均）
                     const getWindowStart = () => {
                         const now = new Date();
-                        if (chartPeriod.value === 'last3months') return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-                        if (chartPeriod.value === 'last6months') return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+                        if (chartPeriod.value === 'year') return new Date(now.getFullYear(), 0, 1);
+                        if (chartPeriod.value === 'quarter') return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+                        if (chartPeriod.value === 'last12months') return new Date(now.getFullYear(), now.getMonth() - 11, 1);
+                        if (chartPeriod.value === 'last6months') return new Date(now.getFullYear(), now.getMonth() - 5, 1);
                         return null;
                     };
                     const windowStart = getWindowStart();
@@ -991,63 +1011,22 @@
                     });
                     let subCatData = Object.keys(subCatMap).map(k => ({ name: k, value: subCatMap[k].toFixed(2) }));
 
-                    // 3. 准备特定分类走势柱状图数据
+                    // 3. 准备特定分类走势柱状图数据（所有时间尺度统一按自然月聚合）
                     let catTrendMap = {};
                     if (rawRecordsForCategory.length > 0) {
                         let firstDate = new Date(rawRecordsForCategory[0].date);
                         let lastDate = new Date(rawRecordsForCategory[rawRecordsForCategory.length - 1].date);
-                        
-                        let startYear = firstDate.getFullYear();
-                        let endYear = lastDate.getFullYear();
-                        
-                        if (chartPeriod.value === 'year') {
-                            for (let y = startYear; y <= endYear; y++) catTrendMap[y + '年'] = 0;
-                        } else if (chartPeriod.value === 'halfyear') {
-                            let startH = firstDate.getMonth() < 6 ? 1 : 2;
-                            let endH = lastDate.getMonth() < 6 ? 1 : 2;
-                            for (let y = startYear; y <= endYear; y++) {
-                                let hStart = (y === startYear) ? startH : 1;
-                                let hEnd = (y === endYear) ? endH : 2;
-                                for (let h = hStart; h <= hEnd; h++) {
-                                    catTrendMap[y + (h === 1 ? '年上半年' : '年下半年')] = 0;
-                                }
-                            }
-                        } else if (chartPeriod.value === 'quarter') {
-                            let startQ = Math.ceil((firstDate.getMonth() + 1) / 3);
-                            let endQ = Math.ceil((lastDate.getMonth() + 1) / 3);
-                            for (let y = startYear; y <= endYear; y++) {
-                                let qStart = (y === startYear) ? startQ : 1;
-                                let qEnd = (y === endYear) ? endQ : 4;
-                                for (let q = qStart; q <= qEnd; q++) catTrendMap[y + '年Q' + q] = 0;
-                            }
-                        } else {
-                            let startMonth = firstDate.getMonth();
-                            let endMonth = lastDate.getMonth();
-                            for (let y = startYear; y <= endYear; y++) {
-                                let mStart = (y === startYear) ? startMonth : 0;
-                                let mEnd = (y === endYear) ? endMonth : 11;
-                                for (let m = mStart; m <= mEnd; m++) {
-                                    let monthStr = y + '-' + String(m + 1).padStart(2, '0');
-                                    catTrendMap[monthStr] = 0;
-                                }
-                            }
+                        let cursor = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+                        const endCursor = new Date(lastDate.getFullYear(), lastDate.getMonth(), 1);
+                        while (cursor <= endCursor) {
+                            catTrendMap[cursor.getFullYear() + '-' + String(cursor.getMonth() + 1).padStart(2, '0')] = 0;
+                            cursor.setMonth(cursor.getMonth() + 1);
                         }
                     }
 
                     rawRecordsForCategory.forEach(r => {
                         if (r.categoryName === selectedChartCategory.value) {
-                            let key;
-                            if (chartPeriod.value === 'year') {
-                                key = r.date.substring(0, 4) + '年';
-                            } else if (chartPeriod.value === 'halfyear') {
-                                let month = parseInt(r.date.substring(5, 7));
-                                key = r.date.substring(0, 4) + (month <= 6 ? '年上半年' : '年下半年');
-                            } else if (chartPeriod.value === 'quarter') {
-                                let month = parseInt(r.date.substring(5, 7));
-                                key = r.date.substring(0, 4) + '年Q' + Math.ceil(month / 3);
-                            } else {
-                                key = r.date.substring(0, 7); 
-                            }
+                            let key = r.date.substring(0, 7);
                             if (catTrendMap[key] !== undefined) {
                                 catTrendMap[key] += r.amount;
                             } else {
