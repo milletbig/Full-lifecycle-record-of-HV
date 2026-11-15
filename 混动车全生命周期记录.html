@@ -118,10 +118,10 @@
 
                             <el-form-item v-if="currentCategory && currentCategory.hasSub" label="具体项目">
                                 <el-select v-if="currentCategory.name === '保养'" v-model="form.subCategoryList" multiple collapse-tags placeholder="可多选保养项目" style="width: 100%;">
-                                    <el-option v-for="sub in currentCategory.subItems" :key="sub" :label="sub" :value="sub"></el-option>
+                                    <el-option v-for="sub in currentCategory.subItems" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
                                 </el-select>
                                 <el-select v-else v-model="form.subCategory" placeholder="请选择二级项目" style="width: 100%;">
-                                    <el-option v-for="sub in currentCategory.subItems" :key="sub" :label="sub" :value="sub"></el-option>
+                                    <el-option v-for="sub in currentCategory.subItems" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
                                 </el-select>
                             </el-form-item>
 
@@ -362,16 +362,18 @@
                             <el-switch v-model="scope.row.hasSub" @change="saveCategories"></el-switch>
                         </template>
                     </el-table-column>
-                    <el-table-column label="二级标签(回车添加, 点击标签删除)">
+                    <el-table-column label="二级标签(回车添加, 点击标签重命名, ×删除)">
                         <template #default="scope">
                             <template v-if="scope.row.hasSub">
                                 <el-tag 
-                                    v-for="(tag, index) in scope.row.subItems" 
-                                    :key="tag" 
+                                    v-for="tag in scope.row.subItems" 
+                                    :key="tag.id" 
                                     closable 
-                                    @close="removeSubItem(scope.row, index)"
-                                    style="margin-right: 8px; margin-bottom: 5px;">
-                                    {{ tag }}
+                                    @close="removeSubItem(scope.row, tag.id)"
+                                    @click="renameSubItem(scope.row, tag)"
+                                    title="点击重命名"
+                                    style="margin-right: 8px; margin-bottom: 5px; cursor: pointer;">
+                                    {{ tag.name }}
                                 </el-tag>
                                 <el-input
                                     v-model="scope.row.newSubInput"
@@ -391,6 +393,10 @@
                         </template>
                     </el-table-column>
                 </el-table>
+                <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap;">
+                    <span style="font-size: 12px; color: #909399;">点击标签可重命名；× 仅移除标签选项，不影响历史记录展示。</span>
+                    <el-button v-if="renameSnapshot" size="small" @click="undoLastRename">撤销上次改名（{{ renameSnapshot.oldName }} → {{ renameSnapshot.newName }}）</el-button>
+                </div>
 
                 <el-divider></el-divider>
 
@@ -438,10 +444,15 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261115002';
+                const currentVersion = '20261115003';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261115003', date: '2026-11-15', items: [
+                        { h: '二级标签对象化', t: 'subItems 由字符串数组升级为 {id,name,active,aliases} 对象；启动时自动迁移旧数据，并回填历史记录的 subCategoryIds。' },
+                        { h: '标签重命名', t: '设置页点击标签即可重命名，校验空值、20 字上限、“、”与同类别重名；执行前预览影响条数并生成快照，可一键撤销。' },
+                        { h: '历史同步与留痕', t: '按“、”拆分做 token 级精确替换，金额与统计口径不变；操作写入 hev_op_logs，最多保留 1000 条。' }
+                    ] },
                     { version: '20261115002', date: '2026-11-15', items: [
                         { h: '金额走势默认维度', t: '第四行第二个图表默认展示“充电”金额走势，分类选择器仍可切换其他类别。' },
                         { h: '统一配色', t: '收敛为 4 个语义色（蓝=费用/里程、绿=电耗、琥珀=油耗、紫=CS折算）+ 1 个中性灰，饼图最多 5 色，固定 Hex 无渐变。' },
@@ -512,13 +523,17 @@
                     { id: 'v_default', name: '默认爱车' }
                 ];
 
+                const subItemsFromNames = (names, prefix) => names.map((name, i) => ({
+                    id: `${prefix}_${i}`, name, active: true, aliases: []
+                }));
+
                 const defaultCategories = [
                     { id: '1', name: '加油', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: true },
                     { id: '2', name: '充电', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: true },
                     { id: '3', name: '保险', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
-                    { id: '4', name: '保养', type: 'expense', hasSub: true, subItems: ['机油机滤', '空调滤芯', '空气滤芯'], newSubInput: '', requireMileage: true },
-                    { id: '5', name: '维修', type: 'expense', hasSub: true, subItems: ['更换雨刮', '轮胎更换', '钣金喷漆', '太阳膜'], newSubInput: '', requireMileage: true },
-                    { id: '6', name: '违章', type: 'expense', hasSub: true, subItems: ['超速', '闯红灯', '违停', '违规变道'], newSubInput: '', requireMileage: false },
+                    { id: '4', name: '保养', type: 'expense', hasSub: true, subItems: subItemsFromNames(['机油机滤', '空调滤芯', '空气滤芯'], 'sub_m'), newSubInput: '', requireMileage: true },
+                    { id: '5', name: '维修', type: 'expense', hasSub: true, subItems: subItemsFromNames(['更换雨刮', '轮胎更换', '钣金喷漆', '太阳膜'], 'sub_r'), newSubInput: '', requireMileage: true },
+                    { id: '6', name: '违章', type: 'expense', hasSub: true, subItems: subItemsFromNames(['超速', '闯红灯', '违停', '违规变道'], 'sub_v'), newSubInput: '', requireMileage: false },
                     { id: '7', name: '停车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
                     { id: '8', name: '高速费', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
                     { id: '10', name: '洗车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
@@ -529,6 +544,7 @@
 
                 const categories = ref([]);
                 const records = ref([]);
+                const renameSnapshot = ref(null);
                 
                 const form = reactive({
                     id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '', subCategoryList: [],
@@ -648,6 +664,52 @@
                 });
 
                 // =============== 初始化与持久化 ===============
+                const makeSubId = () => 'sub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+                // 标签对象化迁移：字符串 -> {id,name,active,aliases}，并回填记录的 subCategoryIds
+                const normalizeSubItems = () => {
+                    categories.value.forEach(cat => {
+                        if (!Array.isArray(cat.subItems)) cat.subItems = [];
+                        cat.subItems = cat.subItems.map((item, idx) => {
+                            if (typeof item === 'string') {
+                                return { id: makeSubId() + idx, name: item, active: true, aliases: [] };
+                            }
+                            return {
+                                id: item.id || (makeSubId() + idx),
+                                name: item.name || String(item),
+                                active: item.active !== false,
+                                aliases: Array.isArray(item.aliases) ? item.aliases : []
+                            };
+                        });
+                    });
+                    records.value.forEach(r => {
+                        if (Array.isArray(r.subCategoryIds)) return;
+                        const cat = categories.value.find(c => c.id === r.categoryId);
+                        const tokens = String(r.subCategory || '').split('、').filter(Boolean);
+                        r.subCategoryIds = cat
+                            ? tokens.map(t => {
+                                const hit = cat.subItems.find(s => s.name === t);
+                                return hit ? hit.id : null;
+                            }).filter(Boolean)
+                            : [];
+                    });
+                };
+
+                const OPERATION_LOG_KEY = 'hev_op_logs';
+
+                const appendOperationLog = (entry) => {
+                    let logs = [];
+                    try { logs = JSON.parse(localStorage.getItem(OPERATION_LOG_KEY)) || []; }
+                    catch (e) { logs = []; }
+                    logs.unshift({
+                        id: 'log_' + Date.now(),
+                        ts: Date.now(),
+                        operator: 'local',
+                        ...entry
+                    });
+                    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(logs.slice(0, 1000)));
+                };
+
                 const loadData = () => {
                     const savedVehicles = localStorage.getItem('hev_vehicles');
                     if (savedVehicles) vehicles.value = JSON.parse(savedVehicles);
@@ -704,6 +766,16 @@
                         if (parsedSet.maintMonths === undefined) parsedSet.maintMonths = 12;
                         if (parsedSet.csDuty === undefined) parsedSet.csDuty = 0.50;
                         Object.assign(appSettings, parsedSet);
+                    }
+
+                    normalizeSubItems();
+                    saveData();
+
+                    try {
+                        const rawSnap = localStorage.getItem('hev_snapshot_latest');
+                        renameSnapshot.value = rawSnap ? JSON.parse(rawSnap) : null;
+                    } catch (e) {
+                        renameSnapshot.value = null;
                     }
                 };
 
@@ -786,6 +858,12 @@
                     }
                     const newRecord = { ...form, id: Date.now().toString(), vehicleId: currentVehicleId.value };
                     delete newRecord.subCategoryList;
+                    // 双写：保留展示文本，同时记录稳定标签 ID，供后续改名/合并使用
+                    const catObj = categories.value.find(c => c.id === form.categoryId);
+                    const selectedNames = String(newRecord.subCategory || '').split('、').filter(Boolean);
+                    newRecord.subCategoryIds = catObj
+                        ? catObj.subItems.filter(s => selectedNames.includes(s.name)).map(s => s.id)
+                        : [];
                     records.value.push(newRecord);
                     records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
                     saveData();
@@ -834,13 +912,132 @@
                 const deleteCategory = (index) => { categories.value.splice(index, 1); saveCategories(); };
 
                 const addSubItem = (row) => {
-                    if (row.newSubInput && !row.subItems.includes(row.newSubInput)) {
-                        row.subItems.push(row.newSubInput);
-                        row.newSubInput = '';
-                        saveCategories();
+                    const name = String(row.newSubInput || '').trim();
+                    if (!name) return;
+                    if (name.length > 20) return ElementPlus.ElMessage.warning('标签名称不能超过 20 个字符');
+                    if (name.includes('、')) return ElementPlus.ElMessage.warning('标签名称不能包含“、”');
+                    if ((row.subItems || []).some(s => s.name === name)) return ElementPlus.ElMessage.warning('该标签已存在');
+                    row.subItems.push({ id: makeSubId(), name, active: true, aliases: [] });
+                    row.newSubInput = '';
+                    saveCategories();
+                };
+                const removeSubItem = (row, tagId) => {
+                    row.subItems = row.subItems.filter(s => s.id !== tagId);
+                    saveCategories();
+                };
+
+                const applySubItemRename = (cat, tag, oldName, newName, affected) => {
+                    try {
+                        const snapshot = {
+                            ts: Date.now(),
+                            action: 'tag-rename',
+                            categoryId: cat.id,
+                            categoryName: cat.name,
+                            tagId: tag.id,
+                            oldName,
+                            newName,
+                            affectedRecords: affected,
+                            categories: JSON.parse(JSON.stringify(categories.value)),
+                            records: JSON.parse(JSON.stringify(records.value))
+                        };
+                        localStorage.setItem('hev_snapshot_latest', JSON.stringify(snapshot));
+                        renameSnapshot.value = snapshot;
+
+                        tag.name = newName;
+                        tag.aliases = Array.from(new Set([...(tag.aliases || []), oldName]));
+
+                        records.value.forEach(r => {
+                            if (r.categoryId !== cat.id || !r.subCategory) return;
+                            const tokens = String(r.subCategory).split('、');
+                            if (!tokens.includes(oldName)) return;
+                            r.subCategory = tokens.map(t => t === oldName ? newName : t).join('、');
+                            if (Array.isArray(r.subCategoryIds) && !r.subCategoryIds.includes(tag.id)) {
+                                r.subCategoryIds.push(tag.id);
+                            }
+                        });
+
+                        saveData();
+                        appendOperationLog({
+                            action: 'rename-subtag',
+                            categoryId: cat.id,
+                            categoryName: cat.name,
+                            tagId: tag.id,
+                            oldName,
+                            newName,
+                            affectedRecords: affected,
+                            result: 'success'
+                        });
+                        updateCharts();
+                        ElementPlus.ElMessage.success(`已重命名为“${newName}”，同步 ${affected} 条历史记录`);
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('重命名失败：' + e.message);
                     }
                 };
-                const removeSubItem = (row, index) => { row.subItems.splice(index, 1); saveCategories(); };
+
+                const renameSubItem = (cat, tag) => {
+                    ElementPlus.ElMessageBox.prompt('重命名后，历史记录中的同名标签会同步更新，金额与统计口径不变。', '编辑二级标签', {
+                        inputValue: tag.name,
+                        confirmButtonText: '下一步',
+                        cancelButtonText: '取消',
+                        inputValidator: (val) => {
+                            const name = String(val || '').trim();
+                            if (!name) return '标签名称不能为空';
+                            if (name.length > 20) return '标签名称不能超过 20 个字符';
+                            if (name.includes('、')) return '标签名称不能包含“、”';
+                            if ((cat.subItems || []).some(s => s.id !== tag.id && s.name === name)) return '同类别下已存在该标签';
+                            return true;
+                        }
+                    }).then(({ value }) => {
+                        const newName = String(value || '').trim();
+                        const oldName = tag.name;
+                        if (newName === oldName) return;
+
+                        const affected = records.value.filter(r =>
+                            r.categoryId === cat.id &&
+                            String(r.subCategory || '').split('、').includes(oldName)
+                        ).length;
+
+                        const tip = affected > 0
+                            ? `将同步更新 ${affected} 条历史记录中的“${oldName}”为“${newName}”，金额与统计口径不变。是否继续？`
+                            : '该标签暂无历史记录，是否继续重命名？';
+
+                        ElementPlus.ElMessageBox.confirm(tip, '确认重命名', {
+                            type: 'warning',
+                            confirmButtonText: '确认修改',
+                            cancelButtonText: '取消'
+                        }).then(() => {
+                            applySubItemRename(cat, tag, oldName, newName, affected);
+                        }).catch(() => {});
+                    }).catch(() => {});
+                };
+
+                const undoLastRename = () => {
+                    const snap = renameSnapshot.value;
+                    if (!snap || !Array.isArray(snap.categories) || !Array.isArray(snap.records)) return;
+                    ElementPlus.ElMessageBox.confirm(
+                        `将恢复改名前的标签与记录，并回滚改名之后的其它改动。确认撤销“${snap.oldName} → ${snap.newName}”？`,
+                        '撤销改名',
+                        { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '取消' }
+                    ).then(() => {
+                        categories.value = snap.categories;
+                        records.value = snap.records;
+                        saveData();
+                        appendOperationLog({
+                            action: 'undo-rename',
+                            categoryId: snap.categoryId,
+                            categoryName: snap.categoryName,
+                            tagId: snap.tagId,
+                            oldName: snap.newName,
+                            newName: snap.oldName,
+                            affectedRecords: snap.affectedRecords,
+                            result: 'success'
+                        });
+                        localStorage.removeItem('hev_snapshot_latest');
+                        renameSnapshot.value = null;
+                        updateCharts();
+                        ElementPlus.ElMessage.success('已撤销上次改名');
+                    }).catch(() => {});
+                };
 
                 // =============== 图表逻辑 ===============
                 let gasChart, evChart, costChart, totalEnergyChart, mileageChart;
@@ -1349,6 +1546,7 @@
                                 if (data.settings) Object.assign(appSettings, data.settings);
                                 
                                 currentVehicleId.value = vehicles.value[0].id;
+                                normalizeSubItems();
                                 saveData();
                                 saveSettings();
                                 ElementPlus.ElMessage.success('数据恢复成功！');
@@ -1389,7 +1587,8 @@
                     filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie,
                     tableFilter, filteredTableRecords, tableStats, maintenanceInfo, insuranceInfo, inspectionInfo,
                     handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
-                    saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem, saveSettings,
+                    saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem,
+                    renameSubItem, renameSnapshot, undoLastRename, saveSettings,
                     exportData, exportCSV, triggerFileInput, importData, handleTabClick, updateCharts
                 };
             }
