@@ -118,10 +118,10 @@
 
                             <el-form-item v-if="currentCategory && currentCategory.hasSub" label="具体项目">
                                 <el-select v-if="currentCategory.name === '保养'" v-model="form.subCategoryList" multiple collapse-tags placeholder="可多选保养项目" style="width: 100%;">
-                                    <el-option v-for="sub in currentCategory.subItems" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
+                                    <el-option v-for="sub in currentCategory.subItems.filter(s => s.active !== false)" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
                                 </el-select>
                                 <el-select v-else v-model="form.subCategory" placeholder="请选择二级项目" style="width: 100%;">
-                                    <el-option v-for="sub in currentCategory.subItems" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
+                                    <el-option v-for="sub in currentCategory.subItems.filter(s => s.active !== false)" :key="sub.id" :label="sub.name" :value="sub.name"></el-option>
                                 </el-select>
                             </el-form-item>
 
@@ -368,12 +368,14 @@
                                 <el-tag 
                                     v-for="tag in scope.row.subItems" 
                                     :key="tag.id" 
+                                    :type="tag.active === false ? 'info' : undefined"
+                                    :effect="tag.active === false ? 'plain' : 'light'"
                                     closable 
                                     @close="removeSubItem(scope.row, tag.id)"
-                                    @click="renameSubItem(scope.row, tag)"
-                                    title="点击重命名"
+                                    @click="onTagClick(scope.row, tag)"
+                                    :title="tag.active === false ? '已停用，点击启用' : '点击重命名'"
                                     style="margin-right: 8px; margin-bottom: 5px; cursor: pointer;">
-                                    {{ tag.name }}
+                                    {{ tag.name }}{{ tag.active === false ? '（已停用）' : '' }}
                                 </el-tag>
                                 <el-input
                                     v-model="scope.row.newSubInput"
@@ -394,9 +396,47 @@
                     </el-table-column>
                 </el-table>
                 <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap;">
-                    <span style="font-size: 12px; color: #909399;">点击标签可重命名；× 仅移除标签选项，不影响历史记录展示。</span>
-                    <el-button v-if="renameSnapshot" size="small" @click="undoLastRename">撤销上次改名（{{ renameSnapshot.oldName }} → {{ renameSnapshot.newName }}）</el-button>
+                    <span style="font-size: 12px; color: #909399;">点击标签重命名或启用；× 仅移除标签选项，不影响历史记录展示。</span>
+                    <el-button size="small" :disabled="!canManage" @click="openTagOpsDialog">合并 / 停用</el-button>
+                    <el-button v-if="renameSnapshot && canManage" size="small" @click="undoLastRename">撤销上次标签操作（{{ renameSnapshot.oldName }} → {{ renameSnapshot.newName }}）</el-button>
                 </div>
+
+                <h4 style="margin: 18px 0 8px; font-size: 14px;">操作日志（最近 20 条）</h4>
+                <el-table :data="opLogs.slice(0, 20)" size="small" border style="width: 100%;" empty-text="暂无操作日志">
+                    <el-table-column label="时间" width="170">
+                        <template #default="scope">{{ formatLogTime(scope.row.ts) }}</template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="90">
+                        <template #default="scope">{{ logActionLabel(scope.row.action) }}</template>
+                    </el-table-column>
+                    <el-table-column prop="categoryName" label="类别" width="100"></el-table-column>
+                    <el-table-column label="标签变更" min-width="180">
+                        <template #default="scope">
+                            {{ scope.row.oldName || '-' }}<span v-if="scope.row.newName"> → {{ scope.row.newName }}</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="affectedRecords" label="影响条数" width="90"></el-table-column>
+                    <el-table-column prop="result" label="结果" width="80"></el-table-column>
+                </el-table>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                    <el-button size="small" @click="loadOpLogs">刷新日志</el-button>
+                    <span style="font-size: 12px; color: #909399;">日志仅保存在本地，最多保留 1000 条。</span>
+                </div>
+
+                <el-divider></el-divider>
+                <h4 style="margin: 0 0 10px; font-size: 14px;">权限与角色</h4>
+                <el-form label-width="100px" size="small" style="max-width: 460px;">
+                    <el-form-item label="当前角色">
+                        <el-select v-model="appSettings.role" style="width: 100%;" @change="saveSettings">
+                            <el-option label="管理员（全部权限）" value="admin"></el-option>
+                            <el-option label="编辑者（记账，不可维护标签）" value="editor"></el-option>
+                            <el-option label="只读（仅查看）" value="viewer"></el-option>
+                        </el-select>
+                    </el-form-item>
+                </el-form>
+                <p style="font-size: 12px; color: #909399; margin: 0 0 10px;">
+                    本地角色用于防误操作，不构成账号级安全隔离：任何能打开本页的人都可以切换角色。
+                </p>
 
                 <el-divider></el-divider>
 
@@ -428,6 +468,39 @@
                 </div>
             </el-tab-pane>
         </el-tabs>
+
+        <el-dialog v-model="tagOpsVisible" title="标签合并 / 停用" width="540px" :close-on-click-modal="false">
+            <el-form label-width="100px" size="small">
+                <el-form-item label="类别">
+                    <el-select v-model="tagOps.categoryId" style="width: 100%;" @change="onTagOpsCategoryChange">
+                        <el-option v-for="c in subCategories" :key="c.id" :label="c.name" :value="c.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="源标签">
+                    <el-select v-model="tagOps.sourceId" style="width: 100%;">
+                        <el-option v-for="t in tagOpsTags" :key="t.id" :label="t.active === false ? t.name + '（已停用）' : t.name" :value="t.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="操作">
+                    <el-radio-group v-model="tagOps.action">
+                        <el-radio label="merge">合并到目标标签</el-radio>
+                        <el-radio label="deactivate">停用标签</el-radio>
+                    </el-radio-group>
+                </el-form-item>
+                <el-form-item v-if="tagOps.action === 'merge'" label="目标标签">
+                    <el-select v-model="tagOps.targetId" style="width: 100%;">
+                        <el-option v-for="t in tagOpsTargets" :key="t.id" :label="t.active === false ? t.name + '（已停用）' : t.name" :value="t.id"></el-option>
+                    </el-select>
+                </el-form-item>
+            </el-form>
+            <div style="font-size: 12px; color: #606266; background: #f5f7fa; padding: 10px 12px; border-radius: 4px;">
+                影响历史记录：<strong>{{ tagOpsAffected }}</strong> 条。合并会同步替换标签并停用源标签；停用仅影响新记录下拉，不改动历史数据。
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+                <el-button @click="tagOpsVisible = false">取消</el-button>
+                <el-button type="primary" @click="runTagOps">确认执行</el-button>
+            </div>
+        </el-dialog>
     </div>
 
     <!-- Vue 3 & Element Plus & ECharts Scripts -->
@@ -444,10 +517,15 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261115003';
+                const currentVersion = '20261115004';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261115004', date: '2026-11-15', items: [
+                        { h: '标签合并与停用', t: '设置页新增“合并 / 停用”入口：合并会同步替换历史记录中的标签并停用源标签；停用后不再出现在新记录下拉，历史展示与统计不变，可点击标签重新启用。' },
+                        { h: '操作日志界面', t: '设置页展示最近 20 条标签操作，含时间、操作类型、类别、标签变更、影响条数与结果，可刷新查看。' },
+                        { h: '权限体系', t: '新增管理员 / 编辑者 / 只读三种本地角色：只读禁止记账与删除，编辑者不可维护标签与类别，管理员拥有全部权限。' }
+                    ] },
                     { version: '20261115003', date: '2026-11-15', items: [
                         { h: '二级标签对象化', t: 'subItems 由字符串数组升级为 {id,name,active,aliases} 对象；启动时自动迁移旧数据，并回填历史记录的 subCategoryIds。' },
                         { h: '标签重命名', t: '设置页点击标签即可重命名，校验空值、20 字上限、“、”与同类别重名；执行前预览影响条数并生成快照，可一键撤销。' },
@@ -513,8 +591,15 @@
                     fuelUnit: 'L/百公里',
                     maintKm: 10000,
                     maintMonths: 12,
-                    csDuty: 0.50
+                    csDuty: 0.50,
+                    role: 'admin'
                 });
+
+                const opLogs = ref([]);
+                const currentRole = computed(() => appSettings.role || 'admin');
+                const canEdit = computed(() => currentRole.value !== 'viewer');
+                const canManage = computed(() => currentRole.value === 'admin');
+                const subCategories = computed(() => categories.value.filter(c => c.hasSub));
 
                 const vehicles = ref([]);
                 const currentVehicleId = ref('');
@@ -697,18 +782,31 @@
 
                 const OPERATION_LOG_KEY = 'hev_op_logs';
 
+                const loadOpLogs = () => {
+                    try { opLogs.value = JSON.parse(localStorage.getItem(OPERATION_LOG_KEY)) || []; }
+                    catch (e) { opLogs.value = []; }
+                };
+
                 const appendOperationLog = (entry) => {
-                    let logs = [];
-                    try { logs = JSON.parse(localStorage.getItem(OPERATION_LOG_KEY)) || []; }
-                    catch (e) { logs = []; }
-                    logs.unshift({
+                    const log = {
                         id: 'log_' + Date.now(),
                         ts: Date.now(),
                         operator: 'local',
                         ...entry
-                    });
-                    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(logs.slice(0, 1000)));
+                    };
+                    opLogs.value = [log, ...opLogs.value].slice(0, 1000);
+                    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(opLogs.value));
                 };
+
+                const logActionLabel = (action) => ({
+                    'rename-subtag': '重命名',
+                    'merge-subtag': '合并',
+                    'deactivate-subtag': '停用',
+                    'reactivate-subtag': '启用',
+                    'undo-rename': '撤销'
+                }[action] || action);
+
+                const formatLogTime = (ts) => ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '-';
 
                 const loadData = () => {
                     const savedVehicles = localStorage.getItem('hev_vehicles');
@@ -765,10 +863,12 @@
                         if (parsedSet.maintKm === undefined) parsedSet.maintKm = 10000;
                         if (parsedSet.maintMonths === undefined) parsedSet.maintMonths = 12;
                         if (parsedSet.csDuty === undefined) parsedSet.csDuty = 0.50;
+                        if (parsedSet.role === undefined) parsedSet.role = 'admin';
                         Object.assign(appSettings, parsedSet);
                     }
 
                     normalizeSubItems();
+                    loadOpLogs();
                     saveData();
 
                     try {
@@ -847,7 +947,19 @@
                     if(cat && !cat.requireMileage) { form.hev = 0; form.ev = 0; form.totalMileage = 0; }
                 };
 
+                const requireEdit = () => {
+                    if (canEdit.value) return true;
+                    ElementPlus.ElMessage.warning('当前为只读角色，无法修改记录');
+                    return false;
+                };
+                const requireManage = () => {
+                    if (canManage.value) return true;
+                    ElementPlus.ElMessage.warning('仅管理员可维护标签与类别');
+                    return false;
+                };
+
                 const saveRecord = () => {
+                    if (!requireEdit()) return;
                     if (!form.date || !form.categoryId || !currentVehicleId.value) {
                         ElementPlus.ElMessage.error('日期、记录类别和车辆归属为必填项！');
                         return;
@@ -872,6 +984,7 @@
                 };
 
                 const deleteRecord = (id) => {
+                    if (!requireEdit()) return;
                     records.value = records.value.filter(r => r.id !== id);
                     saveData();
                     ElementPlus.ElMessage.success('已删除记录');
@@ -881,6 +994,7 @@
                 const saveCategories = () => saveData();
 
                 const addCategory = (type) => {
+                    if (!requireManage()) return;
                     const titleName = type === 'income' ? '新增收入类别' : '新增支出类别';
                     ElementPlus.ElMessageBox.prompt(`请输入${titleName}名称`, titleName, { confirmButtonText: '确定', cancelButtonText: '取消' })
                         .then(({ value }) => {
@@ -892,6 +1006,7 @@
                 };
 
                 const editCategory = (index) => {
+                    if (!requireManage()) return;
                     const cat = categories.value[index];
                     const oldName = cat.name;
                     ElementPlus.ElMessageBox.prompt('请输入新的类别名称', '编辑类别', {
@@ -909,9 +1024,10 @@
                     }).catch(() => {});
                 };
 
-                const deleteCategory = (index) => { categories.value.splice(index, 1); saveCategories(); };
+                const deleteCategory = (index) => { if (!requireManage()) return; categories.value.splice(index, 1); saveCategories(); };
 
                 const addSubItem = (row) => {
+                    if (!requireManage()) return;
                     const name = String(row.newSubInput || '').trim();
                     if (!name) return;
                     if (name.length > 20) return ElementPlus.ElMessage.warning('标签名称不能超过 20 个字符');
@@ -922,6 +1038,7 @@
                     saveCategories();
                 };
                 const removeSubItem = (row, tagId) => {
+                    if (!requireManage()) return;
                     row.subItems = row.subItems.filter(s => s.id !== tagId);
                     saveCategories();
                 };
@@ -975,6 +1092,7 @@
                 };
 
                 const renameSubItem = (cat, tag) => {
+                    if (!requireManage()) return;
                     ElementPlus.ElMessageBox.prompt('重命名后，历史记录中的同名标签会同步更新，金额与统计口径不变。', '编辑二级标签', {
                         inputValue: tag.name,
                         confirmButtonText: '下一步',
@@ -1012,11 +1130,12 @@
                 };
 
                 const undoLastRename = () => {
+                    if (!requireManage()) return;
                     const snap = renameSnapshot.value;
                     if (!snap || !Array.isArray(snap.categories) || !Array.isArray(snap.records)) return;
                     ElementPlus.ElMessageBox.confirm(
-                        `将恢复改名前的标签与记录，并回滚改名之后的其它改动。确认撤销“${snap.oldName} → ${snap.newName}”？`,
-                        '撤销改名',
+                        `将恢复操作前的标签与记录，并回滚之后的其它改动。确认撤销“${snap.oldName} → ${snap.newName}”？`,
+                        '撤销标签操作',
                         { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '取消' }
                     ).then(() => {
                         categories.value = snap.categories;
@@ -1035,7 +1154,143 @@
                         localStorage.removeItem('hev_snapshot_latest');
                         renameSnapshot.value = null;
                         updateCharts();
-                        ElementPlus.ElMessage.success('已撤销上次改名');
+                        ElementPlus.ElMessage.success('已撤销上次标签操作');
+                    }).catch(() => {});
+                };
+
+                // =============== 标签合并 / 停用（P3） ===============
+                const tagOpsVisible = ref(false);
+                const tagOps = reactive({ categoryId: '', sourceId: '', targetId: '', action: 'merge' });
+                const tagOpsCategory = computed(() => categories.value.find(c => c.id === tagOps.categoryId) || null);
+                const tagOpsTags = computed(() => tagOpsCategory.value ? tagOpsCategory.value.subItems : []);
+                const tagOpsTargets = computed(() => tagOpsTags.value.filter(t => t.id !== tagOps.sourceId));
+                const tagOpsSource = computed(() => tagOpsTags.value.find(t => t.id === tagOps.sourceId) || null);
+                const tagOpsAffected = computed(() => {
+                    if (!tagOpsSource.value) return 0;
+                    return records.value.filter(r =>
+                        r.categoryId === tagOps.categoryId &&
+                        String(r.subCategory || '').split('、').includes(tagOpsSource.value.name)
+                    ).length;
+                });
+
+                const openTagOpsDialog = () => {
+                    if (!requireManage()) return;
+                    const first = subCategories.value[0];
+                    tagOps.categoryId = first ? first.id : '';
+                    tagOps.sourceId = '';
+                    tagOps.targetId = '';
+                    tagOps.action = 'merge';
+                    tagOpsVisible.value = true;
+                };
+
+                const onTagOpsCategoryChange = () => {
+                    tagOps.sourceId = '';
+                    tagOps.targetId = '';
+                };
+
+                const onTagClick = (cat, tag) => {
+                    if (!requireManage()) return;
+                    if (tag.active === false) {
+                        ElementPlus.ElMessageBox.confirm(`启用标签“${tag.name}”？启用后可再次用于新记录。`, '启用标签', {
+                            type: 'info', confirmButtonText: '启用', cancelButtonText: '取消'
+                        }).then(() => {
+                            tag.active = true;
+                            saveCategories();
+                            appendOperationLog({
+                                action: 'reactivate-subtag', categoryId: cat.id, categoryName: cat.name,
+                                tagId: tag.id, oldName: tag.name, newName: tag.name, affectedRecords: 0, result: 'success'
+                            });
+                            ElementPlus.ElMessage.success('标签已启用');
+                        }).catch(() => {});
+                        return;
+                    }
+                    renameSubItem(cat, tag);
+                };
+
+                const applyTagMerge = (cat, src, tgt, affected) => {
+                    try {
+                        const snapshot = {
+                            ts: Date.now(),
+                            action: 'tag-merge',
+                            categoryId: cat.id,
+                            categoryName: cat.name,
+                            tagId: src.id,
+                            oldName: src.name,
+                            newName: tgt.name,
+                            affectedRecords: affected,
+                            categories: JSON.parse(JSON.stringify(categories.value)),
+                            records: JSON.parse(JSON.stringify(records.value))
+                        };
+                        localStorage.setItem('hev_snapshot_latest', JSON.stringify(snapshot));
+                        renameSnapshot.value = snapshot;
+
+                        records.value.forEach(r => {
+                            if (r.categoryId !== cat.id || !r.subCategory) return;
+                            const tokens = String(r.subCategory).split('、');
+                            if (!tokens.includes(src.name)) return;
+                            const merged = [];
+                            tokens.forEach(t => {
+                                const v = t === src.name ? tgt.name : t;
+                                if (!merged.includes(v)) merged.push(v);
+                            });
+                            r.subCategory = merged.join('、');
+                            if (Array.isArray(r.subCategoryIds)) {
+                                r.subCategoryIds = Array.from(new Set(
+                                    r.subCategoryIds.map(id => id === src.id ? tgt.id : id)
+                                ));
+                            }
+                        });
+
+                        src.active = false;
+                        src.aliases = Array.from(new Set([...(src.aliases || []), src.name]));
+                        tgt.aliases = Array.from(new Set([...(tgt.aliases || []), src.name]));
+
+                        saveData();
+                        appendOperationLog({
+                            action: 'merge-subtag', categoryId: cat.id, categoryName: cat.name,
+                            tagId: src.id, oldName: src.name, newName: tgt.name,
+                            affectedRecords: affected, result: 'success'
+                        });
+                        tagOpsVisible.value = false;
+                        updateCharts();
+                        ElementPlus.ElMessage.success(`已将“${src.name}”合并到“${tgt.name}”，同步 ${affected} 条记录`);
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('合并失败：' + e.message);
+                    }
+                };
+
+                const runTagOps = () => {
+                    if (!requireManage()) return;
+                    const cat = tagOpsCategory.value;
+                    const src = tagOpsSource.value;
+                    if (!cat || !src) return ElementPlus.ElMessage.warning('请选择类别和源标签');
+
+                    if (tagOps.action === 'merge') {
+                        const tgt = cat.subItems.find(t => t.id === tagOps.targetId);
+                        if (!tgt) return ElementPlus.ElMessage.warning('请选择目标标签');
+                        if (tgt.id === src.id) return ElementPlus.ElMessage.warning('目标标签不能与源标签相同');
+                        const affected = tagOpsAffected.value;
+                        ElementPlus.ElMessageBox.confirm(
+                            `将“${src.name}”合并到“${tgt.name}”，同步 ${affected} 条历史记录；源标签将停用。是否继续？`,
+                            '确认合并', { type: 'warning', confirmButtonText: '确认合并', cancelButtonText: '取消' }
+                        ).then(() => applyTagMerge(cat, src, tgt, affected)).catch(() => {});
+                        return;
+                    }
+
+                    if (src.active === false) return ElementPlus.ElMessage.warning('该标签已是停用状态');
+                    const affected = tagOpsAffected.value;
+                    ElementPlus.ElMessageBox.confirm(
+                        `停用“${src.name}”？停用后不再出现在新记录下拉，${affected} 条历史记录的展示与统计不受影响。`,
+                        '确认停用', { type: 'warning', confirmButtonText: '确认停用', cancelButtonText: '取消' }
+                    ).then(() => {
+                        src.active = false;
+                        saveCategories();
+                        appendOperationLog({
+                            action: 'deactivate-subtag', categoryId: cat.id, categoryName: cat.name,
+                            tagId: src.id, oldName: src.name, newName: '', affectedRecords: affected, result: 'success'
+                        });
+                        tagOpsVisible.value = false;
+                        ElementPlus.ElMessage.success('标签已停用');
                     }).catch(() => {});
                 };
 
@@ -1531,6 +1786,7 @@
                 const triggerFileInput = () => { document.getElementById('fileInput').click(); };
 
                 const importData = (event) => {
+                    if (!requireManage()) return;
                     const file = event.target.files[0];
                     if (!file) return;
                     const reader = new FileReader();
@@ -1589,6 +1845,9 @@
                     handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
                     saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem,
                     renameSubItem, renameSnapshot, undoLastRename, saveSettings,
+                    canEdit, canManage, currentRole, opLogs, loadOpLogs, logActionLabel, formatLogTime,
+                    tagOpsVisible, tagOps, subCategories, tagOpsTags, tagOpsTargets, tagOpsAffected,
+                    openTagOpsDialog, onTagOpsCategoryChange, runTagOps, onTagClick,
                     exportData, exportCSV, triggerFileInput, importData, handleTabClick, updateCharts
                 };
             }
