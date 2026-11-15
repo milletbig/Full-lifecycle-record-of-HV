@@ -438,10 +438,20 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261114005';
+                const currentVersion = '20261115002';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261115002', date: '2026-11-15', items: [
+                        { h: '金额走势默认维度', t: '第四行第二个图表默认展示“充电”金额走势，分类选择器仍可切换其他类别。' },
+                        { h: '统一配色', t: '收敛为 4 个语义色（蓝=费用/里程、绿=电耗、琥珀=油耗、紫=CS折算）+ 1 个中性灰，饼图最多 5 色，固定 Hex 无渐变。' },
+                        { h: '图表规范', t: '统一坐标轴线/刻度、虚线网格、数据点标识与图例；金额走势在点数较少时显示数值标签。' }
+                    ] },
+                    { version: '20261115001', date: '2026-11-15', items: [
+                        { h: 'CS 标定模块', t: '设置页新增独立标定子功能：标定周期（月/里程）、手动标定入口、标定历史记录表，并附前置条件与操作指引。' },
+                        { h: '标定算法', t: '按“燃油量 + SOC 电量平衡（1 kWh≈0.31 L）”计算样本 η，限幅 0.30~0.80，并以 0.7 旧值 + 0.3 样本平滑写入 CS 折算系数。' },
+                        { h: '数据兼容', t: '标定历史独立存储并纳入备份导入/导出；新增电池可用容量参数，缺省 18.3 kWh。' }
+                    ] },
                     { version: '20261114005', date: '2026-11-14', items: [
                         { h: '时间尺度扩展', t: '新增「全部」「今年」选项：全部=全历史按自然月聚合，今年=当前自然年按自然月聚合，默认「今年」。' },
                         { h: '版本日志分组', t: '版本与更新日志按自然月分组展示，随「全部/今年」联动过滤，并清理旧格式版本记录。' }
@@ -670,7 +680,11 @@
                         categories.value = defaultCategories;
                     }
 
-                    if (categories.value.length > 0) selectedChartCategory.value = categories.value[0].name;
+                    if (categories.value.length > 0) {
+                        selectedChartCategory.value = categories.value.some(c => c.name === '充电')
+                            ? '充电'
+                            : categories.value[0].name;
+                    }
                     
                     const savedRecords = localStorage.getItem('hev_records');
                     if (savedRecords) {
@@ -894,6 +908,39 @@
                     if (failed.length) console.warn('时间尺度边界校验未通过：', failed);
                 };
 
+                // 统一图表配色：4 个语义色 + 1 个中性色，固定 Hex，避免渐变与屏幕相关的色彩偏差
+                // 蓝=费用/里程/金额，绿=电耗/纯电，琥珀=油耗，紫=CS折算/衍生指标，灰=参考线
+                const CHART = {
+                    blue: '#3B82F6',
+                    green: '#10B981',
+                    amber: '#F59E0B',
+                    violet: '#8B5CF6',
+                    slate: '#94A3B8',
+                    axis: '#E5E7EB',
+                    split: '#F1F5F9',
+                    label: '#6B7280'
+                };
+                const CHART_PIE_COLORS = [CHART.blue, CHART.green, CHART.amber, CHART.violet, CHART.slate];
+                const chartTooltipBase = {
+                    backgroundColor: '#FFFFFF',
+                    borderColor: CHART.axis,
+                    borderWidth: 1,
+                    textStyle: { color: '#374151', fontSize: 11 },
+                    extraCssText: 'box-shadow: 0 4px 12px rgba(15,23,42,0.08);'
+                };
+                const chartPoint = { showSymbol: true, symbol: 'circle', symbolSize: 5 };
+                const chartYAxis = {
+                    type: 'value',
+                    axisLine: { show: false },
+                    axisTick: { show: false },
+                    axisLabel: { color: CHART.label, fontSize: 10 },
+                    splitLine: { lineStyle: { color: CHART.split, type: 'dashed' } }
+                };
+                const chartLegend = {
+                    top: 0, right: 0, itemWidth: 12, itemHeight: 8,
+                    textStyle: { fontSize: 10, color: CHART.label }
+                };
+
                 const updateCharts = () => {
                     if (!gasChart) return;
 
@@ -1091,121 +1138,146 @@
 
                     // ====== 渲染所有图表 ======
                     const commonOptions = {
-                        tooltip: { trigger: 'axis' },
-                        grid: { left: '15%', right: '8%', bottom: '10%', top: '25%' },
-                        xAxis: { type: 'category', boundaryGap: false }
+                        color: CHART_PIE_COLORS,
+                        tooltip: { ...chartTooltipBase, trigger: 'axis' },
+                        legend: { ...chartLegend },
+                        grid: { left: '15%', right: '8%', bottom: '12%', top: '30%' },
+                        xAxis: {
+                            type: 'category', boundaryGap: false,
+                            axisLine: { lineStyle: { color: CHART.axis } },
+                            axisTick: { show: false },
+                            axisLabel: { color: CHART.label, fontSize: 10 }
+                        }
                     };
 
                     // 里程总览：合并原“总里程变化”与“HEV与EV里程变化”
                     // 左轴=累计总里程（面积线），右轴=HEV/EV 分项里程，保留两组核心维度
                     mileageChart.setOption({
-                        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-                        legend: { data: ['总里程', 'HEV里程', 'EV里程'], top: 0, right: 0, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 10 } },
-                        grid: { left: '12%', right: '12%', bottom: '12%', top: '30%' },
+                        tooltip: { ...chartTooltipBase, trigger: 'axis', axisPointer: { type: 'cross' } },
+                        legend: { ...chartLegend, data: ['总里程', 'HEV里程', 'EV里程'] },
+                        grid: { left: '12%', right: '12%', bottom: '12%', top: '32%' },
                         title: { text: '里程总览 (km)', textStyle: { fontSize: 13 } },
-                        xAxis: { type: 'category', boundaryGap: false, data: mileageDates },
+                        xAxis: { ...commonOptions.xAxis, data: mileageDates },
                         yAxis: [
-                            { type: 'value', name: '总里程', nameTextStyle: { fontSize: 10 }, scale: true, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed' } } },
-                            { type: 'value', name: 'HEV/EV', nameTextStyle: { fontSize: 10 }, scale: true, axisLabel: { fontSize: 10 }, splitLine: { show: false } }
+                            { ...chartYAxis, name: '总里程', nameTextStyle: { color: CHART.label, fontSize: 10 }, scale: true },
+                            { ...chartYAxis, name: 'HEV/EV', nameTextStyle: { color: CHART.label, fontSize: 10 }, scale: true, splitLine: { show: false } }
                         ],
                         series: [
-                            { name: '总里程', type: 'line', data: totalMileageValues, smooth: true, color: '#3ba272', areaStyle: { opacity: 0.12 }, yAxisIndex: 0 },
-                            { name: 'HEV里程', type: 'line', data: hevValues, smooth: true, color: '#ee6666', yAxisIndex: 1 },
-                            { name: 'EV里程', type: 'line', data: evValuesMileage, smooth: true, color: '#5470c6', yAxisIndex: 1 }
+                            { ...chartPoint, name: '总里程', type: 'line', data: totalMileageValues, smooth: true, color: CHART.blue, areaStyle: { opacity: 0.10 }, yAxisIndex: 0 },
+                            { ...chartPoint, name: 'HEV里程', type: 'line', data: hevValues, smooth: true, color: CHART.amber, yAxisIndex: 1 },
+                            { ...chartPoint, name: 'EV里程', type: 'line', data: evValuesMileage, smooth: true, color: CHART.green, yAxisIndex: 1 }
                         ]
                     });
 
                     chartEvRatio.setOption({
                         ...commonOptions,
+                        legend: { ...chartLegend, data: ['纯电比例'] },
                         title: { text: '纯电比例 (EV Ratio %)', textStyle: { fontSize: 13 } },
                         xAxis: { ...commonOptions.xAxis, data: ratioDates },
-                        yAxis: { type: 'value', max: 100 },
-                        series: [{ name: '纯电比例', type: 'line', data: ratioValues, smooth: true, color: '#91cc75', areaStyle: { opacity: 0.3 } }]
+                        yAxis: { ...chartYAxis, max: 100 },
+                        series: [{ ...chartPoint, name: '纯电比例', type: 'line', data: ratioValues, smooth: true, color: CHART.green, areaStyle: { opacity: 0.18 } }]
                     });
 
                     gasChart.setOption({
-                        tooltip: { trigger: 'axis' },
-                        legend: { data: ['综合油耗', '燃油行驶段油耗', '馈电油耗(CS折算)'], top: 0, right: 0, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 10 } },
-                        grid: { left: '15%', right: '14%', bottom: '12%', top: '32%' },
+                        tooltip: { ...chartTooltipBase, trigger: 'axis' },
+                        legend: { ...chartLegend, data: ['综合油耗', '燃油行驶段油耗', '馈电油耗(CS折算)'] },
+                        grid: { left: '15%', right: '14%', bottom: '12%', top: '34%' },
                         title: {
                             text: `油耗分析 (${appSettings.fuelUnit})`,
                             subtext: `CS折算系数 η=${(Number(appSettings.csDuty) || 0.50).toFixed(2)}`,
                             textStyle: { fontSize: 13 },
-                            subtextStyle: { fontSize: 10, color: '#909399' }
+                            subtextStyle: { fontSize: 10, color: CHART.label }
                         },
                         xAxis: { ...commonOptions.xAxis, data: gasDates },
                         yAxis: [
-                            { type: 'value', name: '综合', nameTextStyle: { fontSize: 10 }, min: 'dataMin', axisLabel: { fontSize: 10 } },
-                            { type: 'value', name: '段/CS', nameTextStyle: { fontSize: 10 }, splitLine: { show: false }, axisLabel: { fontSize: 10 } }
+                            { ...chartYAxis, name: '综合', nameTextStyle: { color: CHART.label, fontSize: 10 }, min: 'dataMin' },
+                            { ...chartYAxis, name: '段/CS', nameTextStyle: { color: CHART.label, fontSize: 10 }, splitLine: { show: false } }
                         ],
                         series: [
-                            { name: '综合油耗', type: 'line', data: gasTotalValues, smooth: true, color: '#5470c6' },
-                            { name: '燃油行驶段油耗', type: 'line', data: gasValues, smooth: true, color: '#ee6666', yAxisIndex: 1 },
-                            { name: '馈电油耗(CS折算)', type: 'line', data: csValues, smooth: true, color: '#91cc75', yAxisIndex: 1,
+                            { ...chartPoint, name: '综合油耗', type: 'line', data: gasTotalValues, smooth: true, color: CHART.amber },
+                            { ...chartPoint, name: '燃油行驶段油耗', type: 'line', data: gasValues, smooth: true, color: CHART.blue, yAxisIndex: 1 },
+                            { ...chartPoint, name: '馈电油耗(CS折算)', type: 'line', data: csValues, smooth: true, color: CHART.violet, yAxisIndex: 1,
                               lineStyle: { type: 'dashed' },
-                              markLine: { silent: true, symbol: 'none', data: [{ yAxis: appSettings.fuelUnit === 'L/百公里' ? 5.3 : 0.053, label: { formatter: '官方WLTC', fontSize: 9 }, lineStyle: { color: '#c0c4cc', type: 'dotted' } }] } }
+                              markLine: { silent: true, symbol: 'none', data: [{ yAxis: appSettings.fuelUnit === 'L/百公里' ? 5.3 : 0.053, label: { formatter: '官方WLTC', fontSize: 9, color: CHART.label }, lineStyle: { color: CHART.slate, type: 'dotted' } }] } }
                         ]
                     });
 
                     evChart.setOption({
                         ...commonOptions,
+                        legend: { ...chartLegend, data: ['电耗'] },
                         title: { text: `区间电耗 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
                         xAxis: { ...commonOptions.xAxis, data: evDates },
-                        yAxis: { type: 'value', min: 'dataMin' },
-                        series: [{ name: '电耗', type: 'line', data: evValues, smooth: true, color: '#5470c6' }]
+                        yAxis: { ...chartYAxis, min: 'dataMin' },
+                        series: [{ ...chartPoint, name: '电耗', type: 'line', data: evValues, smooth: true, color: CHART.green }]
                     });
 
                     totalEnergyChart.setOption({
                         ...commonOptions,
+                        legend: { ...chartLegend, data: ['综合能耗'] },
                         title: { text: `综合能耗曲线 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
                         xAxis: { ...commonOptions.xAxis, data: energyDates },
-                        yAxis: { type: 'value', min: 'dataMin' },
-                        series: [{ name: '综合能耗', type: 'line', data: energyValues, smooth: true, color: '#fac858', areaStyle: { opacity: 0.2 } }]
+                        yAxis: { ...chartYAxis, min: 'dataMin' },
+                        series: [{ ...chartPoint, name: '综合能耗', type: 'line', data: energyValues, smooth: true, color: CHART.blue, areaStyle: { opacity: 0.12 } }]
                     });
 
                     costChart.setOption({
                         ...commonOptions,
+                        legend: { ...chartLegend, data: ['综合净费用'] },
                         title: { text: `综合净费用走势 (${appSettings.costUnit})`, textStyle: { fontSize: 13 } },
                         xAxis: { ...commonOptions.xAxis, data: costDates },
-                        yAxis: { type: 'value' },
-                        series: [{ name: '综合净费用', type: 'line', data: costValues, smooth: true, color: '#91cc75', areaStyle: { opacity: 0.2 } }]
+                        yAxis: { ...chartYAxis },
+                        series: [{ ...chartPoint, name: '综合净费用', type: 'line', data: costValues, smooth: true, color: CHART.blue, areaStyle: { opacity: 0.12 } }]
                     });
 
                     chartCategoryPie.setOption({
+                        color: CHART_PIE_COLORS,
                         title: { text: '分类支出占比', textStyle: { fontSize: 13 }, left: 'center' },
-                        tooltip: { trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
+                        tooltip: { ...chartTooltipBase, trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
                         series: [{
                             type: 'pie', radius: ['25%', '50%'], center: ['50%', '55%'],
                             itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
-                            label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14 },
-                            data: pieData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                            label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14, color: '#374151', fontSize: 10 },
+                            data: pieData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(15, 23, 42, 0.15)' } }
                         }]
                     });
 
                     if (showSubCatPie.value) {
                         if (!chartSubCategoryPie) chartSubCategoryPie = echarts.init(document.getElementById('chartSubCategoryPie'));
                         chartSubCategoryPie.setOption({
+                            color: CHART_PIE_COLORS,
                             title: { text: `【${selectedChartCategory.value}】子项目占比`, textStyle: { fontSize: 13 }, left: 'center' },
-                            tooltip: { trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
+                            tooltip: { ...chartTooltipBase, trigger: 'item', formatter: '{b}: {c}元 ({d}%)' },
                             series: [{
                                 type: 'pie', radius: '50%', center: ['50%', '55%'],
                                 itemStyle: { borderRadius: 3, borderColor: '#fff', borderWidth: 2 },
-                                label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14 },
-                                data: subCatData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                                label: { formatter: '{b}\n{c}元\n({d}%)', lineHeight: 14, color: '#374151', fontSize: 10 },
+                                data: subCatData, emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(15, 23, 42, 0.15)' } }
                             }]
                         });
                     }
 
                     const curCatObj = categories.value.find(c => c.name === selectedChartCategory.value);
-                    const barColor = (curCatObj && curCatObj.type === 'income') ? '#91cc75' : '#73c0de';
+                    const barColor = (curCatObj && curCatObj.type === 'income') ? CHART.green : CHART.blue;
 
                     chartCategoryTrend.setOption({
+                        color: [barColor],
                         title: { text: `【${selectedChartCategory.value || '-'}】金额走势`, textStyle: { fontSize: 13 } },
-                        tooltip: { trigger: 'axis' },
-                        grid: { left: '15%', right: '8%', bottom: '10%', top: '25%' },
-                        xAxis: { type: 'category', data: catTrendDates, axisLabel: { interval: 'auto', rotate: 30 } },
-                        yAxis: { type: 'value' },
-                        series: [{ name: '金额(元)', type: 'bar', data: catTrendValues, color: barColor, barMaxWidth: 40 }]
+                        tooltip: { ...chartTooltipBase, trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        legend: { ...chartLegend, data: ['金额(元)'] },
+                        grid: { left: '15%', right: '8%', bottom: '14%', top: '30%' },
+                        xAxis: {
+                            type: 'category', data: catTrendDates,
+                            axisLine: { lineStyle: { color: CHART.axis } },
+                            axisTick: { show: false },
+                            axisLabel: { interval: 'auto', rotate: 30, color: CHART.label, fontSize: 10 }
+                        },
+                        yAxis: { ...chartYAxis, name: '元', nameTextStyle: { color: CHART.label, fontSize: 10 } },
+                        series: [{
+                            name: '金额(元)', type: 'bar', data: catTrendValues,
+                            barMaxWidth: 32,
+                            itemStyle: { borderRadius: [4, 4, 0, 0] },
+                            label: { show: catTrendValues.length <= 12, position: 'top', fontSize: 9, color: CHART.label }
+                        }]
                     });
 
                     nextTick(() => {
