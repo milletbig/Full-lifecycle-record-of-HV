@@ -32,6 +32,11 @@
         }
         .log-list { padding-left: 20px; color: #606266; font-size: 14px; line-height: 1.8; margin-top: 5px; }
         .log-group-title { margin: 14px 0 8px; padding-left: 8px; border-left: 3px solid #409eff; font-size: 13px; font-weight: 600; color: #606266; }
+        .el-table th.col-nowrap-header .cell { white-space: nowrap; }
+        .category-sort-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #ebeef5; font-size: 13px; }
+        .category-sort-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .category-sort-row:last-child { border-bottom: none; }
+        .category-sort-dialog { max-width: 460px; }
         
         /* 管家卡片样式 */
         .maint-card { background: #fdf6ec; border-left: 5px solid #e6a23c; border-radius: 4px; padding: 15px; margin-bottom: 20px; font-size: 13px; color: #606266; }
@@ -129,8 +134,8 @@
                                 <el-input-number v-model="form.liters" :min="0" :precision="2" :step="1" style="width: 100%;"></el-input-number>
                             </el-form-item>
 
-                            <el-form-item v-if="currentCategory && currentCategory.name === '充电'" label="充电电量 (kWh，选填)">
-                                <el-input-number v-model="form.kwh" :min="0" :precision="2" :step="1" style="width: 100%;" placeholder="家充/公桩/免费桩，无法统计可留空"></el-input-number>
+                            <el-form-item v-if="currentCategory && currentCategory.name === '充电'" label="充电电量（kWh）">
+                                <el-input-number v-model="form.kwh" :min="0" :precision="2" :step="1" style="width: 100%;" placeholder="选填"></el-input-number>
                             </el-form-item>
 
                             <el-form-item label="备注">
@@ -282,7 +287,7 @@
                             {{ !requiresMileage(scope.row.categoryName) ? '-' : scope.row.ev }}
                         </template>
                     </el-table-column>
-                    <el-table-column prop="liters" label="加油（升数）" width="100">
+                    <el-table-column prop="liters" label="加油（L）" width="96" label-class-name="col-nowrap-header">
                         <template #default="scope">{{ scope.row.liters ? scope.row.liters : '-' }}</template>
                     </el-table-column>
                     <el-table-column label="充电(度)" width="90">
@@ -355,6 +360,7 @@
                 <div style="margin-bottom: 20px;">
                     <el-button type="danger" @click="addCategory('expense')">新增支出类别</el-button>
                     <el-button type="success" @click="addCategory('income')">新增收入类别</el-button>
+                    <el-button :disabled="!canManage" @click="openCategorySort">手动排序</el-button>
                 </div>
                 
                 <el-table :data="categories" style="width: 100%" border>
@@ -515,6 +521,23 @@
                 <el-button type="primary" @click="runTagOps">确认执行</el-button>
             </div>
         </el-dialog>
+
+        <el-dialog v-model="sortDialogVisible" title="类别手动排序" width="92%" class="category-sort-dialog" :close-on-click-modal="false">
+            <div style="max-height: 420px; overflow-y: auto; border: 1px solid #ebeef5; border-radius: 4px;">
+                <div v-for="(cat, idx) in sortDraft" :key="cat.id" class="category-sort-row">
+                    <el-tag :type="cat.type === 'income' ? 'success' : 'danger'" size="small">{{ cat.type === 'income' ? '收入' : '支出' }}</el-tag>
+                    <span style="flex: 1;">{{ cat.name }}</span>
+                    <el-button size="small" :disabled="idx === 0" @click="moveCategory(idx, -1)">上移</el-button>
+                    <el-button size="small" :disabled="idx === sortDraft.length - 1" @click="moveCategory(idx, 1)">下移</el-button>
+                </div>
+            </div>
+            <p style="font-size: 12px; color: #909399; margin: 10px 0 0;">保存后按自定义顺序展示，新增类别默认追加到末尾；可随时恢复固定顺序。</p>
+            <template #footer>
+                <el-button @click="sortDialogVisible = false">取消</el-button>
+                <el-button @click="resetCategoryOrder">恢复固定顺序</el-button>
+                <el-button type="primary" @click="saveCategoryOrder">保存排序</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <!-- Vue 3 & Element Plus & ECharts Scripts -->
@@ -531,10 +554,15 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261116002';
+                const currentVersion = '20261116003';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261116003', date: '2026-11-16', items: [
+                        { h: '充电电量文案', t: '标签调整为“充电电量（kWh）”，输入框占位提示“选填”，明确非必填。' },
+                        { h: '加油列表头', t: '“加油（升数）”改为“加油（L）”，列宽调整为 96px 并禁止表头换行。' },
+                        { h: '类别手动排序', t: '类别管理新增“手动排序”入口，支持上移/下移并保存自定义顺序，可一键恢复固定顺序。' }
+                    ] },
                     { version: '20261116002', date: '2026-11-16', items: [
                         { h: '表头与备注列', t: '“备注(升数)”改为“加油（升数）”；新增独立“备注”列与录入框，支持通用备注，CSV 导出同步包含。' },
                         { h: '支出类目排序', t: '支出类目固定按 充电、加油、过路费、停车、洗车、违章、保养、维修、保险、年检、购车/车贷 展示，新增类别自动归位。' },
@@ -616,10 +644,13 @@
                     maintKm: 10000,
                     maintMonths: 12,
                     csDuty: 0.50,
-                    role: 'admin'
+                    role: 'admin',
+                    categoryOrderCustom: false
                 });
 
                 const opLogs = ref([]);
+                const sortDialogVisible = ref(false);
+                const sortDraft = ref([]);
                 const currentRole = computed(() => appSettings.role || 'admin');
                 const canEdit = computed(() => currentRole.value !== 'viewer');
                 const canManage = computed(() => currentRole.value === 'admin');
@@ -749,7 +780,8 @@
                 });
 
                 const EXPENSE_CATEGORY_ORDER = ['充电', '加油', '过路费', '停车', '洗车', '违章', '保养', '维修', '保险', '年检', '购车/车贷'];
-                const sortCategories = () => {
+                const sortCategories = (force = false) => {
+                    if (appSettings.categoryOrderCustom && !force) return;
                     categories.value.sort((a, b) => {
                         const typeRankA = a.type === 'expense' ? 0 : 1;
                         const typeRankB = b.type === 'expense' ? 0 : 1;
@@ -913,7 +945,6 @@
                     } else {
                         categories.value = defaultCategories;
                     }
-                    sortCategories();
 
                     if (categories.value.length > 0) {
                         selectedChartCategory.value = categories.value.some(c => c.name === '充电')
@@ -939,9 +970,11 @@
                         if (parsedSet.maintMonths === undefined) parsedSet.maintMonths = 12;
                         if (parsedSet.csDuty === undefined) parsedSet.csDuty = 0.50;
                         if (parsedSet.role === undefined) parsedSet.role = 'admin';
+                        if (parsedSet.categoryOrderCustom === undefined) parsedSet.categoryOrderCustom = false;
                         Object.assign(appSettings, parsedSet);
                     }
 
+                    sortCategories();
                     normalizeSubItems();
                     migrateLegacyLabels();
                     loadOpLogs();
@@ -964,6 +997,37 @@
                 const saveSettings = () => {
                     localStorage.setItem('hev_app_settings', JSON.stringify(appSettings));
                     updateCharts();
+                };
+
+                const openCategorySort = () => {
+                    if (!requireManage()) return;
+                    sortDraft.value = categories.value.slice();
+                    sortDialogVisible.value = true;
+                };
+                const moveCategory = (idx, delta) => {
+                    const to = idx + delta;
+                    if (to < 0 || to >= sortDraft.value.length) return;
+                    const arr = sortDraft.value.slice();
+                    [arr[idx], arr[to]] = [arr[to], arr[idx]];
+                    sortDraft.value = arr;
+                };
+                const saveCategoryOrder = () => {
+                    if (!requireManage()) return;
+                    categories.value = sortDraft.value.slice();
+                    appSettings.categoryOrderCustom = true;
+                    saveData();
+                    saveSettings();
+                    sortDialogVisible.value = false;
+                    ElementPlus.ElMessage.success('类别顺序已保存');
+                };
+                const resetCategoryOrder = () => {
+                    if (!requireManage()) return;
+                    appSettings.categoryOrderCustom = false;
+                    sortCategories(true);
+                    sortDraft.value = categories.value.slice();
+                    saveData();
+                    saveSettings();
+                    ElementPlus.ElMessage.success('已恢复固定顺序');
                 };
 
                 const handleVehicleChange = () => {
@@ -1950,6 +2014,7 @@
                     canEdit, canManage, currentRole, opLogs, loadOpLogs, logActionLabel, formatLogTime,
                     tagOpsVisible, tagOps, subCategories, tagOpsTags, tagOpsTargets, tagOpsAffected,
                     openTagOpsDialog, onTagOpsCategoryChange, runTagOps, onTagClick,
+                    sortDialogVisible, sortDraft, openCategorySort, moveCategory, saveCategoryOrder, resetCategoryOrder,
                     exportData, exportCSV, triggerFileInput, importData, handleTabClick, updateCharts
                 };
             }
