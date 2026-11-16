@@ -318,6 +318,12 @@
                     <el-table-column label="充电(kWh)" width="104" label-class-name="col-nowrap-header">
                         <template #default="scope">{{ scope.row.kwh ? scope.row.kwh : '-' }}</template>
                     </el-table-column>
+                    <el-table-column label="起始SOC(%)" width="104" label-class-name="col-nowrap-header">
+                        <template #default="scope">{{ formatSoc(scope.row.startSoc) }}</template>
+                    </el-table-column>
+                    <el-table-column label="终止SOC(%)" width="104" label-class-name="col-nowrap-header">
+                        <template #default="scope">{{ formatSoc(scope.row.endSoc) }}</template>
+                    </el-table-column>
                     <el-table-column label="备注" min-width="120">
                         <template #default="scope">{{ scope.row.remark || '-' }}</template>
                     </el-table-column>
@@ -621,6 +627,9 @@
 
                 // 核心获取真实里程的函数
                 const getMileage = (r) => r.totalMileage || (r.hev + r.ev) || 0;
+
+                // 表格 SOC 展示：空值（非充电记录或未填写）统一显示为 "-"
+                const formatSoc = (val) => (val === null || val === undefined || val === '') ? '-' : val;
 
                 const tableFilter = reactive({ dateRange: [], recordType: '', categoryId: '' });
 
@@ -1982,7 +1991,7 @@
                     activeTab, chartPeriod, selectedChartCategory, appSettings, 
                     vehicles, currentVehicleId, currentVehicleName, handleVehicleChange, addVehicle, editVehicle, deleteVehicle,
                     categories, records, activeRecords, form, currentCategory, paginatedRecords,
-                    filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie,
+                    filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie, formatSoc,
                     tableFilter, filteredTableRecords, tableStats, maintenanceInfo, insuranceInfo, inspectionInfo,
                     handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
                     handleSocInput, validateSoc,
