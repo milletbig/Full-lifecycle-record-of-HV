@@ -135,6 +135,34 @@
                                 <el-input-number v-model="form.kwh" :min="0" :precision="2" :step="1" style="width: 100%;" placeholder="选填"></el-input-number>
                             </el-form-item>
 
+                            <template v-if="currentCategory && currentCategory.name === '充电'">
+                                <el-form-item label="起始SOC(%)">
+                                    <el-input
+                                        :model-value="form.startSoc === null || form.startSoc === undefined ? '' : form.startSoc"
+                                        @update:model-value="val => handleSocInput('startSoc', val)"
+                                        @blur="validateSoc('startSoc')"
+                                        maxlength="3"
+                                        inputmode="numeric"
+                                        clearable
+                                        placeholder="选填"
+                                        style="width: 100%;">
+                                    </el-input>
+                                </el-form-item>
+
+                                <el-form-item label="终止SOC(%)">
+                                    <el-input
+                                        :model-value="form.endSoc === null || form.endSoc === undefined ? '' : form.endSoc"
+                                        @update:model-value="val => handleSocInput('endSoc', val)"
+                                        @blur="validateSoc('endSoc')"
+                                        maxlength="3"
+                                        inputmode="numeric"
+                                        clearable
+                                        placeholder="选填"
+                                        style="width: 100%;">
+                                    </el-input>
+                                </el-form-item>
+                            </template>
+
                             <el-form-item label="备注">
                                 <el-input v-model="form.remark" maxlength="100" clearable placeholder="选填，通用备注信息"></el-input>
                             </el-form-item>
@@ -586,7 +614,9 @@
                 
                 const form = reactive({
                     id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '', subCategoryList: [],
-                    amount: 0, hev: 0, ev: 0, liters: 0, kwh: null, totalMileage: 0, remark: ''
+                    amount: 0, hev: 0, ev: 0, liters: 0, kwh: null, totalMileage: 0, remark: '',
+                    // 充电 SOC：均为选填，终止 SOC 默认 100
+                    startSoc: null, endSoc: 100
                 });
 
                 // 核心获取真实里程的函数
@@ -975,6 +1005,7 @@
                 const handleRecordTypeChange = () => {
                     form.categoryId = ''; form.categoryName = ''; form.subCategory = ''; form.subCategoryList = [];
                     form.liters = 0; form.kwh = null;
+                    form.startSoc = null; form.endSoc = null;
                     applyDefaultCategory();
                 };
 
@@ -996,9 +1027,49 @@
                     form.categoryName = cat ? cat.name : '';
                     if(cat && cat.name !== '加油') form.liters = 0;
                     if(cat && cat.name !== '充电') form.kwh = null;
+
+                    // SOC 仅对充电类别生效：进入充电时终止 SOC 默认 100，其余类别清空
+                    if (cat && cat.name === '充电') {
+                        form.startSoc = null;
+                        form.endSoc = 100;
+                    } else {
+                        form.startSoc = null;
+                        form.endSoc = null;
+                    }
                     
                     if(cat && !cat.requireMileage) { form.hev = 0; form.ev = 0; form.totalMileage = 0; }
                     else if (cat && cat.requireMileage) prefillLatestMileage();
+                };
+
+                // ==================== 充电 SOC 字段（选填，0-100 整数） ====================
+                const socFieldLabels = { startSoc: '起始SOC(%)', endSoc: '终止SOC(%)' };
+
+                // 输入阶段仅保留数字字符，避免小数、负号、字母等非法内容
+                const handleSocInput = (key, val) => {
+                    form[key] = String(val === null || val === undefined ? '' : val).replace(/\D/g, '').slice(0, 3);
+                };
+
+                // 空值视为未填写；超出 0-100 时提示并修正到最近的边界值
+                const validateSoc = (key) => {
+                    const raw = String(form[key] === null || form[key] === undefined ? '' : form[key]).trim();
+                    if (raw === '') { form[key] = null; return; }
+                    const num = parseInt(raw, 10);
+                    if (isNaN(num)) { form[key] = null; return; }
+                    if (num < 0 || num > 100) {
+                        const fixed = Math.min(100, Math.max(0, num));
+                        form[key] = fixed;
+                        ElementPlus.ElMessage.warning(`${socFieldLabels[key]}需为 0-100 之间的整数，已自动修正为 ${fixed}`);
+                        return;
+                    }
+                    form[key] = num;
+                };
+
+                // 持久化前统一转为整数或 null，保证旧记录与字符串输入都不会写入脏数据
+                const toSocInt = (val) => {
+                    if (val === null || val === undefined || String(val).trim() === '') return null;
+                    const num = parseInt(val, 10);
+                    if (isNaN(num)) return null;
+                    return Math.min(100, Math.max(0, num));
                 };
 
                 const requireEdit = () => {
@@ -1025,7 +1096,14 @@
                     const newRecord = { ...form, id: Date.now().toString(), vehicleId: currentVehicleId.value };
                     delete newRecord.subCategoryList;
                     newRecord.remark = String(form.remark || '').trim();
-                    if (form.categoryName !== '充电') newRecord.kwh = null;
+                    if (form.categoryName !== '充电') {
+                        newRecord.kwh = null;
+                        newRecord.startSoc = null;
+                        newRecord.endSoc = null;
+                    } else {
+                        newRecord.startSoc = toSocInt(form.startSoc);
+                        newRecord.endSoc = toSocInt(form.endSoc);
+                    }
                     // 双写：保留展示文本，同时记录稳定标签 ID，供后续改名/合并使用
                     const catObj = categories.value.find(c => c.id === form.categoryId);
                     const selectedNames = String(newRecord.subCategory || '').split('、').filter(Boolean);
@@ -1907,6 +1985,7 @@
                     filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie,
                     tableFilter, filteredTableRecords, tableStats, maintenanceInfo, insuranceInfo, inspectionInfo,
                     handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
+                    handleSocInput, validateSoc,
                     saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem,
                     renameSubItem, renameSnapshot, undoLastRename, saveSettings,
                     canEdit, canManage, currentRole, opLogs, loadOpLogs, logActionLabel, formatLogTime,
