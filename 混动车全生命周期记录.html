@@ -12,7 +12,6 @@
         .chart-container { height: 230px; width: 100%; margin-bottom: 0; }
         .chart-row > .el-col { margin-bottom: 16px; }
         .el-form-item { margin-bottom: 18px; }
-        .version-tag { font-size: 14px; color: #909399; margin-left: 15px; font-weight: normal; }
         .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ebeef5; flex-wrap: wrap; gap: 10px; }
         /* 图表响应式：按屏幕宽度统一缩放画布高度，窄屏时单列堆叠 */
         @media (max-width: 1200px) {
@@ -30,8 +29,6 @@
         @media (max-width: 480px) {
             .chart-container { height: 180px; }
         }
-        .log-list { padding-left: 20px; color: #606266; font-size: 14px; line-height: 1.8; margin-top: 5px; }
-        .log-group-title { margin: 14px 0 8px; padding-left: 8px; border-left: 3px solid #409eff; font-size: 13px; font-weight: 600; color: #606266; }
         .el-table th.col-nowrap-header .cell { white-space: nowrap; }
         .category-sort-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #ebeef5; font-size: 13px; }
         .category-sort-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -470,22 +467,6 @@
                 <el-divider direction="vertical"></el-divider>
                 <input type="file" id="fileInput" accept=".json" style="display: none" @change="importData">
                 <el-button type="warning" size="large" @click="triggerFileInput">恢复数据 (导入 JSON)</el-button>
-
-                <el-divider></el-divider>
-
-                <!-- 更新日志 -->
-                <h3>版本与更新日志</h3>
-                <div v-for="group in logGroups" :key="group.month">
-                    <div class="log-group-title">{{ group.label }}</div>
-                    <el-collapse v-model="activeVersionLog">
-                        <el-collapse-item v-for="log in group.logs" :key="log.version" :name="log.version"
-                            :title="'版本：' + log.version + (log.version === currentVersion ? ' (当前版本)' : '')">
-                            <ul class="log-list">
-                                <li v-for="(item, idx) in log.items" :key="idx"><strong>{{ item.h }}：</strong>{{ item.t }}</li>
-                            </ul>
-                        </el-collapse-item>
-                    </el-collapse>
-                </div>
             </el-tab-pane>
         </el-tabs>
 
@@ -554,93 +535,6 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261116004';
-                const activeVersionLog = ref([currentVersion]); 
-                // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
-                const versionLogs = [
-                    { version: '20261116004', date: '2026-11-16', items: [
-                        { h: '录入标签精简', t: '录入页“充电电量（kWh）”改为“电量（kWh）”，“加油升数 (L)”改为“升数 (L)”。' },
-                        { h: '表头单位统一', t: '事件记录“充电(度)”改为“充电(kWh)”，列宽与禁止换行配置同步调整；CSV 导出表头改为“升数(L)”“电量(kWh)”。' }
-                    ] },
-                    { version: '20261116003', date: '2026-11-16', items: [
-                        { h: '充电电量文案', t: '标签调整为“充电电量（kWh）”，输入框占位提示“选填”，明确非必填。' },
-                        { h: '加油列表头', t: '“加油（升数）”改为“加油（L）”，列宽调整为 96px 并禁止表头换行。' },
-                        { h: '类别手动排序', t: '类别管理新增“手动排序”入口，支持上移/下移并保存自定义顺序，可一键恢复固定顺序。' }
-                    ] },
-                    { version: '20261116002', date: '2026-11-16', items: [
-                        { h: '表头与备注列', t: '“备注(升数)”改为“加油（升数）”；新增独立“备注”列与录入框，支持通用备注，CSV 导出同步包含。' },
-                        { h: '支出类目排序', t: '支出类目固定按 充电、加油、过路费、停车、洗车、违章、保养、维修、保险、年检、购车/车贷 展示，新增类别自动归位。' },
-                        { h: '默认类目', t: '选择支出默认“充电”，选择收入默认“顺风车”，首次进入页面也按支出+充电初始化。' }
-                    ] },
-                    { version: '20261116001', date: '2026-11-16', items: [
-                        { h: '充电电量选填', t: '充电类别新增“充电电量(kWh)”字段，非必填；家充、公桩、免费桩无法统计时可留空，明细表与 CSV 导出同步展示。' },
-                        { h: '里程自动带出', t: '新增加油、充电、保养、维修记录时，HEV/EV/总里程默认填充当前车辆最近一组里程数据，仍可手动修改。' },
-                        { h: '文案统一', t: '全系统“高速费”统一改为“过路费”，并自动迁移历史类别名称与记录展示。' }
-                    ] },
-                    { version: '20261115004', date: '2026-11-15', items: [
-                        { h: '标签合并与停用', t: '设置页新增“合并 / 停用”入口：合并会同步替换历史记录中的标签并停用源标签；停用后不再出现在新记录下拉，历史展示与统计不变，可点击标签重新启用。' },
-                        { h: '操作日志界面', t: '设置页展示最近 20 条标签操作，含时间、操作类型、类别、标签变更、影响条数与结果，可刷新查看。' },
-                        { h: '权限体系', t: '新增管理员 / 编辑者 / 只读三种本地角色：只读禁止记账与删除，编辑者不可维护标签与类别，管理员拥有全部权限。' }
-                    ] },
-                    { version: '20261115003', date: '2026-11-15', items: [
-                        { h: '二级标签对象化', t: 'subItems 由字符串数组升级为 {id,name,active,aliases} 对象；启动时自动迁移旧数据，并回填历史记录的 subCategoryIds。' },
-                        { h: '标签重命名', t: '设置页点击标签即可重命名，校验空值、20 字上限、“、”与同类别重名；执行前预览影响条数并生成快照，可一键撤销。' },
-                        { h: '历史同步与留痕', t: '按“、”拆分做 token 级精确替换，金额与统计口径不变；操作写入 hev_op_logs，最多保留 1000 条。' }
-                    ] },
-                    { version: '20261115002', date: '2026-11-15', items: [
-                        { h: '金额走势默认维度', t: '第四行第二个图表默认展示“充电”金额走势，分类选择器仍可切换其他类别。' },
-                        { h: '统一配色', t: '收敛为 4 个语义色（蓝=费用/里程、绿=电耗、琥珀=油耗、紫=CS折算）+ 1 个中性灰，饼图最多 5 色，固定 Hex 无渐变。' },
-                        { h: '图表规范', t: '统一坐标轴线/刻度、虚线网格、数据点标识与图例；金额走势在点数较少时显示数值标签。' }
-                    ] },
-                    { version: '20261115001', date: '2026-11-15', items: [
-                        { h: 'CS 标定模块', t: '设置页新增独立标定子功能：标定周期（月/里程）、手动标定入口、标定历史记录表，并附前置条件与操作指引。' },
-                        { h: '标定算法', t: '按“燃油量 + SOC 电量平衡（1 kWh≈0.31 L）”计算样本 η，限幅 0.30~0.80，并以 0.7 旧值 + 0.3 样本平滑写入 CS 折算系数。' },
-                        { h: '数据兼容', t: '标定历史独立存储并纳入备份导入/导出；新增电池可用容量参数，缺省 18.3 kWh。' }
-                    ] },
-                    { version: '20261114005', date: '2026-11-14', items: [
-                        { h: '时间尺度扩展', t: '新增「全部」「今年」选项：全部=全历史按自然月聚合，今年=当前自然年按自然月聚合，默认「今年」。' },
-                        { h: '版本日志分组', t: '版本与更新日志按自然月分组展示，随「全部/今年」联动过滤，并清理旧格式版本记录。' }
-                    ] },
-                    { version: '20261114004', date: '2026-11-14', items: [
-                        { h: '时间尺度标准化', t: '选项调整为 年 / 季度 / 近一年 / 近半年；年=自然年聚合（1/1-12/31，键 YYYY年），季度=自然季度聚合（Q1-Q4，键 YYYYQn），近一年/近半年=含当前月的 12/6 个自然月滚动窗口。' },
-                        { h: '自然月边界', t: '窗口起点统一对齐到自然月首日，全部使用日历月份运算，不使用 30/365 天近似。' },
-                        { h: '边界自检', t: '启动时校验跨年、月初月末、闰年 2 月等场景，异常时输出告警。' }
-                    ] },
-                    { version: '20261114003', date: '2026-11-14', items: [
-                        { h: '图表网格', t: '调整为四行两列标准布局，依次为 里程总览/综合净费用走势、纯电比例/综合能耗曲线、区间电耗/油耗分析、分类支出占比/金额走势；子项目占比保留为条件展示。' },
-                        { h: '保养多选', t: '保养具体项目由单选改为多选，保存时合并为顿号分隔字符串，记录结构与历史数据兼容。' },
-                        { h: '版本控制', t: '新增 .gitignore，忽略所有备份数据 JSON。' }
-                    ] },
-                    { version: '20261114002', date: '2026-11-14', items: [
-                        { h: '看板布局', t: '主图表改为两行网格，第一行「里程总览 + 综合能耗曲线」等宽，第二行「纯电比例 + 区间电耗 + 油耗分析」三等分；其余分析图表保留在下方。' },
-                        { h: '时间尺度', t: '筛选器调整为 全部 / 年 / 季度 / 近一年 / 近半年，默认「全部」；年=今年、季度=本季度，全部趋势图统一按自然月聚合。' },
-                        { h: '联动与响应式', t: '切换尺度时全部图表同步刷新；小屏单列堆叠，顺序为里程、综合能耗、纯电比例、区间电耗、油耗分析。' }
-                    ] },
-                    { version: '20261114001', date: '2026-11-14', items: [
-                        { h: '油耗口径修正', t: '按 GB/T 19753 标准补齐“综合油耗 / 燃油行驶段油耗 / 馈电油耗(CS折算)”三指标，新增可标定的 CS 运转占比 η，双 Y 轴对比并标注官方 WLTC 参考线。' },
-                        { h: '图表合并', t: '原“总里程变化”与“HEV与EV里程变化”合并为“里程总览”，左轴总里程、右轴 HEV/EV 分项，信息不丢失。' },
-                        { h: '布局优化', t: '统一图表间距与卡片高度，加入窄屏单列堆叠与自适应高度，避免重叠错位。' },
-                        { h: '口径统一', t: '综合费用/能耗统一为“自购车起累计支出 ÷ 自购车起累计总里程”，时间尺度只控制显示周期。' }
-                    ] }
-                ];
-                // 全部=展示全部日志；今年及其他尺度=仅展示当前自然年日志；组内按版本号倒序
-                const logGroups = computed(() => {
-                    const scopeAll = chartPeriod.value === 'all';
-                    const yearPrefix = new Date().getFullYear() + '-';
-                    const groups = {};
-                    versionLogs
-                        .filter(log => scopeAll || log.date.startsWith(yearPrefix))
-                        .forEach(log => {
-                            const month = log.date.substring(0, 7);
-                            if (!groups[month]) groups[month] = [];
-                            groups[month].push(log);
-                        });
-                    return Object.keys(groups).sort().reverse().map(month => ({
-                        month,
-                        label: month.replace('-', '年') + '月',
-                        logs: groups[month].sort((a, b) => b.version.localeCompare(a.version))
-                    }));
-                });
                 
                 const appSettings = reactive({
                     costUnit: '元/百公里',
@@ -2007,7 +1901,7 @@
                 });
 
                 return {
-                    activeTab, chartPeriod, selectedChartCategory, activeVersionLog, currentVersion, logGroups, appSettings, 
+                    activeTab, chartPeriod, selectedChartCategory, appSettings, 
                     vehicles, currentVehicleId, currentVehicleName, handleVehicleChange, addVehicle, editVehicle, deleteVehicle,
                     categories, records, activeRecords, form, currentCategory, paginatedRecords,
                     filteredCategories, currentPage, pageSize, requiresMileage, showSubCatPie,
