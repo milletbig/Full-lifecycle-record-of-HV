@@ -129,6 +129,10 @@
                                 <el-input-number v-model="form.liters" :min="0" :precision="2" :step="1" style="width: 100%;"></el-input-number>
                             </el-form-item>
 
+                            <el-form-item v-if="currentCategory && currentCategory.name === '充电'" label="充电电量 (kWh，选填)">
+                                <el-input-number v-model="form.kwh" :min="0" :precision="2" :step="1" style="width: 100%;" placeholder="家充/公桩/免费桩，无法统计可留空"></el-input-number>
+                            </el-form-item>
+
                             <el-form-item :label="form.recordType === 'income' ? '收入金额(元)' : '支出金额(元)'">
                                 <el-input-number v-model="form.amount" :min="0" :precision="2" :step="10" style="width: 100%;"></el-input-number>
                             </el-form-item>
@@ -276,6 +280,9 @@
                     </el-table-column>
                     <el-table-column prop="liters" label="备注(升数)" width="90">
                         <template #default="scope">{{ scope.row.liters ? scope.row.liters : '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="充电(度)" width="90">
+                        <template #default="scope">{{ scope.row.kwh ? scope.row.kwh : '-' }}</template>
                     </el-table-column>
                     <el-table-column label="操作" width="90">
                         <template #default="scope">
@@ -517,10 +524,15 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261115004';
+                const currentVersion = '20261116001';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261116001', date: '2026-11-16', items: [
+                        { h: '充电电量选填', t: '充电类别新增“充电电量(kWh)”字段，非必填；家充、公桩、免费桩无法统计时可留空，明细表与 CSV 导出同步展示。' },
+                        { h: '里程自动带出', t: '新增加油、充电、保养、维修记录时，HEV/EV/总里程默认填充当前车辆最近一组里程数据，仍可手动修改。' },
+                        { h: '文案统一', t: '全系统“高速费”统一改为“过路费”，并自动迁移历史类别名称与记录展示。' }
+                    ] },
                     { version: '20261115004', date: '2026-11-15', items: [
                         { h: '标签合并与停用', t: '设置页新增“合并 / 停用”入口：合并会同步替换历史记录中的标签并停用源标签；停用后不再出现在新记录下拉，历史展示与统计不变，可点击标签重新启用。' },
                         { h: '操作日志界面', t: '设置页展示最近 20 条标签操作，含时间、操作类型、类别、标签变更、影响条数与结果，可刷新查看。' },
@@ -620,7 +632,7 @@
                     { id: '5', name: '维修', type: 'expense', hasSub: true, subItems: subItemsFromNames(['更换雨刮', '轮胎更换', '钣金喷漆', '太阳膜'], 'sub_r'), newSubInput: '', requireMileage: true },
                     { id: '6', name: '违章', type: 'expense', hasSub: true, subItems: subItemsFromNames(['超速', '闯红灯', '违停', '违规变道'], 'sub_v'), newSubInput: '', requireMileage: false },
                     { id: '7', name: '停车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
-                    { id: '8', name: '高速费', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
+                    { id: '8', name: '过路费', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
                     { id: '10', name: '洗车', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
                     { id: '11', name: '购车/车贷', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
                     { id: '12', name: '年检', type: 'expense', hasSub: false, subItems: [], newSubInput: '', requireMileage: false },
@@ -633,7 +645,7 @@
                 
                 const form = reactive({
                     id: '', date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategory: '', subCategoryList: [],
-                    amount: 0, hev: 0, ev: 0, liters: 0, totalMileage: 0
+                    amount: 0, hev: 0, ev: 0, liters: 0, kwh: null, totalMileage: 0
                 });
 
                 // 核心获取真实里程的函数
@@ -729,6 +741,31 @@
                     return cat ? cat.requireMileage : ['加油', '充电', '保养', '维修'].includes(categoryName);
                 };
 
+                // 新增里程记录时，默认带出当前车辆最近一组里程数据
+                const latestMileageSnapshot = computed(() => {
+                    const list = activeRecords.value.filter(r =>
+                        (Number(r.hev) || 0) + (Number(r.ev) || 0) + (Number(r.totalMileage) || 0) > 0
+                    );
+                    if (!list.length) return null;
+                    const latest = list.slice().sort((a, b) => {
+                        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+                        return String(b.id).localeCompare(String(a.id));
+                    })[0];
+                    return {
+                        hev: Number(latest.hev) || 0,
+                        ev: Number(latest.ev) || 0,
+                        totalMileage: Number(latest.totalMileage) || ((Number(latest.hev) || 0) + (Number(latest.ev) || 0))
+                    };
+                });
+
+                const prefillLatestMileage = () => {
+                    const snap = latestMileageSnapshot.value;
+                    if (!snap) return;
+                    form.hev = snap.hev;
+                    form.ev = snap.ev;
+                    nextTick(() => { form.totalMileage = snap.totalMileage; });
+                };
+
                 watch(
                     () => form.hev + form.ev,
                     (newSum) => {
@@ -751,7 +788,6 @@
                 // =============== 初始化与持久化 ===============
                 const makeSubId = () => 'sub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-                // 标签对象化迁移：字符串 -> {id,name,active,aliases}，并回填记录的 subCategoryIds
                 const normalizeSubItems = () => {
                     categories.value.forEach(cat => {
                         if (!Array.isArray(cat.subItems)) cat.subItems = [];
@@ -808,6 +844,16 @@
 
                 const formatLogTime = (ts) => ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '-';
 
+                // 文案迁移：历史“高速费”统一为“过路费”
+                const migrateLegacyLabels = () => {
+                    categories.value.forEach(c => {
+                        if (c.name === '高速费') c.name = '过路费';
+                    });
+                    records.value.forEach(r => {
+                        if (r.categoryName === '高速费') r.categoryName = '过路费';
+                    });
+                };
+
                 const loadData = () => {
                     const savedVehicles = localStorage.getItem('hev_vehicles');
                     if (savedVehicles) vehicles.value = JSON.parse(savedVehicles);
@@ -820,11 +866,12 @@
                         let parsedCats = JSON.parse(savedCats);
                         parsedCats.forEach(c => {
                             if (c.type === undefined) c.type = 'expense';
+                            if (c.name === '高速费') c.name = '过路费';
                             if (c.requireMileage === undefined) c.requireMileage = ['加油', '充电', '保养', '维修'].includes(c.name);
                         });
                         const missingCats = [
                             { name: '停车', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
-                            { name: '高速费', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
+                            { name: '过路费', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
                             { name: '洗车', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
                             { name: '购车/车贷', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
                             { name: '年检', type: 'expense', hasSub: false, subItems: [], requireMileage: false },
@@ -868,6 +915,7 @@
                     }
 
                     normalizeSubItems();
+                    migrateLegacyLabels();
                     loadOpLogs();
                     saveData();
 
@@ -892,6 +940,7 @@
 
                 const handleVehicleChange = () => {
                     currentPage.value = 1; 
+                    if (currentCategory.value && currentCategory.value.requireMileage) prefillLatestMileage();
                     nextTick(() => { updateCharts(); });
                 };
 
@@ -943,8 +992,10 @@
                     const cat = categories.value.find(c => c.id === val);
                     form.categoryName = cat ? cat.name : '';
                     if(cat && cat.name !== '加油') form.liters = 0;
+                    if(cat && cat.name !== '充电') form.kwh = null;
                     
                     if(cat && !cat.requireMileage) { form.hev = 0; form.ev = 0; form.totalMileage = 0; }
+                    else if (cat && cat.requireMileage) prefillLatestMileage();
                 };
 
                 const requireEdit = () => {
@@ -970,6 +1021,7 @@
                     }
                     const newRecord = { ...form, id: Date.now().toString(), vehicleId: currentVehicleId.value };
                     delete newRecord.subCategoryList;
+                    if (form.categoryName !== '充电') newRecord.kwh = null;
                     // 双写：保留展示文本，同时记录稳定标签 ID，供后续改名/合并使用
                     const catObj = categories.value.find(c => c.id === form.categoryId);
                     const selectedNames = String(newRecord.subCategory || '').split('、').filter(Boolean);
@@ -980,6 +1032,7 @@
                     records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
                     saveData();
                     ElementPlus.ElMessage.success('记录保存成功！');
+                    if (form.categoryName && requiresMileage(form.categoryName)) prefillLatestMileage();
                     updateCharts();
                 };
 
@@ -1757,7 +1810,7 @@
 
                 const exportCSV = () => {
                     let csvContent = "\uFEFF"; 
-                    csvContent += "车辆名称,日期,收支类型,一级类别,具体项目,金额(元),总里程(km),HEV里程(km),EV里程(km),备注升数(L)\n";
+                    csvContent += "车辆名称,日期,收支类型,一级类别,具体项目,金额(元),总里程(km),HEV里程(km),EV里程(km),备注升数(L),充电电量(kWh)\n";
                     
                     const vMap = {};
                     vehicles.value.forEach(v => vMap[v.id] = v.name);
@@ -1770,8 +1823,9 @@
                         const hev = r.hev || '';
                         const ev = r.ev || '';
                         const liters = r.liters || '';
+                        const kwh = r.kwh || '';
                         
-                        csvContent += `"${vName}","${r.date}","${rType}","${r.categoryName}","${subCat}",${r.amount},${totalM},${hev},${ev},${liters}\n`;
+                        csvContent += `"${vName}","${r.date}","${rType}","${r.categoryName}","${subCat}",${r.amount},${totalM},${hev},${ev},${liters},${kwh}\n`;
                     });
 
                     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1803,6 +1857,7 @@
                                 
                                 currentVehicleId.value = vehicles.value[0].id;
                                 normalizeSubItems();
+                                migrateLegacyLabels();
                                 saveData();
                                 saveSettings();
                                 ElementPlus.ElMessage.success('数据恢复成功！');
@@ -1821,6 +1876,7 @@
                 onMounted(() => {
                     validateTimeScaleBoundaries();
                     loadData();
+                    prefillLatestMileage();
                     nextTick(() => { initCharts(); });
                     
                     window.addEventListener('resize', () => {
