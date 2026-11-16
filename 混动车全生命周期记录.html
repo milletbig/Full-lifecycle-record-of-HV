@@ -130,11 +130,11 @@
                                 </el-select>
                             </el-form-item>
 
-                            <el-form-item v-if="currentCategory && currentCategory.name === '加油'" label="加油升数 (L)">
+                            <el-form-item v-if="currentCategory && currentCategory.name === '加油'" label="升数 (L)">
                                 <el-input-number v-model="form.liters" :min="0" :precision="2" :step="1" style="width: 100%;"></el-input-number>
                             </el-form-item>
 
-                            <el-form-item v-if="currentCategory && currentCategory.name === '充电'" label="充电电量（kWh）">
+                            <el-form-item v-if="currentCategory && currentCategory.name === '充电'" label="电量（kWh）">
                                 <el-input-number v-model="form.kwh" :min="0" :precision="2" :step="1" style="width: 100%;" placeholder="选填"></el-input-number>
                             </el-form-item>
 
@@ -290,7 +290,7 @@
                     <el-table-column prop="liters" label="加油（L）" width="96" label-class-name="col-nowrap-header">
                         <template #default="scope">{{ scope.row.liters ? scope.row.liters : '-' }}</template>
                     </el-table-column>
-                    <el-table-column label="充电(度)" width="90">
+                    <el-table-column label="充电(kWh)" width="104" label-class-name="col-nowrap-header">
                         <template #default="scope">{{ scope.row.kwh ? scope.row.kwh : '-' }}</template>
                     </el-table-column>
                     <el-table-column label="备注" min-width="120">
@@ -554,10 +554,14 @@
                 const activeTab = ref('home');
                 const chartPeriod = ref('thisyear'); 
                 const selectedChartCategory = ref(''); 
-                const currentVersion = '20261116003';
+                const currentVersion = '20261116004';
                 const activeVersionLog = ref([currentVersion]); 
                 // 版本日志：仅保留新编号（YYYYMMDDnnn），按日期归月
                 const versionLogs = [
+                    { version: '20261116004', date: '2026-11-16', items: [
+                        { h: '录入标签精简', t: '录入页“充电电量（kWh）”改为“电量（kWh）”，“加油升数 (L)”改为“升数 (L)”。' },
+                        { h: '表头单位统一', t: '事件记录“充电(度)”改为“充电(kWh)”，列宽与禁止换行配置同步调整；CSV 导出表头改为“升数(L)”“电量(kWh)”。' }
+                    ] },
                     { version: '20261116003', date: '2026-11-16', items: [
                         { h: '充电电量文案', t: '标签调整为“充电电量（kWh）”，输入框占位提示“选填”，明确非必填。' },
                         { h: '加油列表头', t: '“加油（升数）”改为“加油（L）”，列宽调整为 96px 并禁止表头换行。' },
@@ -1918,7 +1922,7 @@
 
                 const exportCSV = () => {
                     let csvContent = "\uFEFF"; 
-                    csvContent += "车辆名称,日期,收支类型,一级类别,具体项目,金额(元),总里程(km),HEV里程(km),EV里程(km),加油升数(L),充电电量(kWh),备注\n";
+                    csvContent += "车辆名称,日期,收支类型,一级类别,具体项目,金额(元),总里程(km),HEV里程(km),EV里程(km),升数(L),电量(kWh),备注\n";
                     
                     const vMap = {};
                     vehicles.value.forEach(v => vMap[v.id] = v.name);
