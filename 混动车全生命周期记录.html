@@ -34,6 +34,12 @@
         .kwh-row { display: flex; align-items: center; gap: 10px; width: 100%; flex-wrap: wrap; }
         .kwh-row .kwh-input { flex: 1 1 120px; min-width: 0; }
         .kwh-row .el-radio-group { flex: 0 0 auto; }
+        /* 记录拖拽排序 */
+        .drag-handle { cursor: grab; user-select: none; color: #909399; font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 3px; }
+        .drag-handle:hover { color: #409EFF; background: #ecf5ff; }
+        .drag-handle:active { cursor: grabbing; }
+        .el-table__row.drag-row-dragging td { opacity: .45; }
+        .el-table__row.drag-row-over td { background: #ecf5ff !important; }
         .category-sort-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #ebeef5; font-size: 13px; }
         .category-sort-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .category-sort-row:last-child { border-bottom: none; }
@@ -288,7 +294,15 @@
                     </el-form-item>
                 </el-form>
 
-                <el-table :data="paginatedRecords" style="width: 100%" border stripe>
+                <div ref="recordsTableWrap">
+                <el-table :data="paginatedRecords" style="width: 100%" border stripe :row-class-name="recordRowClassName">
+                    <el-table-column label="排序" width="56" align="center">
+                        <template #default="scope">
+                            <span class="drag-handle" title="拖拽调整顺序" :draggable="canEdit"
+                                @dragstart="onDragStart($event, scope.row)"
+                                @dragend="onDragEnd">≡</span>
+                        </template>
+                    </el-table-column>
                     <el-table-column prop="date" label="日期" width="110"></el-table-column>
                     <el-table-column label="收/支" width="70">
                         <template #default="scope">
@@ -337,12 +351,14 @@
                     <el-table-column label="备注" min-width="120">
                         <template #default="scope">{{ scope.row.remark || '-' }}</template>
                     </el-table-column>
-                    <el-table-column label="操作" width="90">
+                    <el-table-column label="操作" width="146">
                         <template #default="scope">
+                            <el-button size="small" type="primary" @click="openEditRecord(scope.row)">编辑</el-button>
                             <el-button size="small" type="danger" @click="deleteRecord(scope.row.id)">删除</el-button>
                         </template>
                     </el-table-column>
                 </el-table>
+                </div>
                 <el-pagination 
                     style="margin-top: 15px;" 
                     background 
@@ -563,6 +579,75 @@
                 <el-button type="primary" @click="saveCategoryOrder">保存排序</el-button>
             </template>
         </el-dialog>
+
+        <el-dialog v-model="editVisible" title="编辑记录" width="min(560px, 92vw)" :close-on-click-modal="false">
+            <el-form label-width="100px">
+                <el-form-item label="日期" required>
+                    <el-date-picker v-model="editForm.date" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" style="width: 100%;"></el-date-picker>
+                </el-form-item>
+                <el-form-item label="收支类型">
+                    <el-radio-group v-model="editForm.recordType" @change="handleEditRecordTypeChange">
+                        <el-radio-button label="expense">支出</el-radio-button>
+                        <el-radio-button label="income">收入</el-radio-button>
+                    </el-radio-group>
+                </el-form-item>
+                <el-form-item label="记录类别" required>
+                    <el-select v-model="editForm.categoryId" placeholder="请选择类别" style="width: 100%;" @change="handleEditCategoryChange">
+                        <el-option v-for="c in editCategories" :key="c.id" :label="c.name" :value="c.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item v-if="editTargetCategory && editTargetCategory.hasSub" label="具体项目">
+                    <el-select v-model="editForm.subCategoryList" :multiple="editForm.categoryName === '保养'" clearable filterable placeholder="请选择具体项目" style="width: 100%;">
+                        <el-option v-for="s in editActiveSubItems" :key="s.id" :label="s.name" :value="s.name"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item :label="editForm.recordType === 'income' ? '收入金额(元)' : '支出金额(元)'" required>
+                    <el-input-number v-model="editForm.amount" :min="0" :precision="2" :step="10" style="width: 100%;"></el-input-number>
+                </el-form-item>
+                <el-form-item v-if="editForm.categoryName === '加油'" label="升数 (L)">
+                    <el-input-number v-model="editForm.liters" :min="0" :precision="2" :step="1" style="width: 100%;"></el-input-number>
+                </el-form-item>
+                <template v-if="editForm.categoryName === '充电'">
+                    <el-form-item label="电量（kWh）">
+                        <div class="kwh-row">
+                            <el-input-number v-model="editForm.kwh" :min="0" :precision="2" :step="1" class="kwh-input" placeholder="选填"></el-input-number>
+                            <el-radio-group v-model="editForm.kwhSource">
+                                <el-radio-button label="pile">桩端</el-radio-button>
+                                <el-radio-button label="vehicle">车端</el-radio-button>
+                            </el-radio-group>
+                        </div>
+                    </el-form-item>
+                    <el-form-item label="起始SOC(%)">
+                        <el-input :model-value="editForm.startSoc === null || editForm.startSoc === undefined ? '' : editForm.startSoc"
+                            @update:model-value="val => handleEditSocInput('startSoc', val)" @blur="validateEditSoc('startSoc')"
+                            maxlength="3" inputmode="numeric" clearable placeholder="选填" style="width: 100%;"></el-input>
+                    </el-form-item>
+                    <el-form-item label="终止SOC(%)">
+                        <el-input :model-value="editForm.endSoc === null || editForm.endSoc === undefined ? '' : editForm.endSoc"
+                            @update:model-value="val => handleEditSocInput('endSoc', val)" @blur="validateEditSoc('endSoc')"
+                            maxlength="3" inputmode="numeric" clearable placeholder="选填" style="width: 100%;"></el-input>
+                    </el-form-item>
+                </template>
+                <template v-if="editForm.categoryName && requiresMileage(editForm.categoryName)">
+                    <el-form-item label="总里程">
+                        <el-input-number v-model="editForm.totalMileage" :min="0" :precision="0" :step="1" style="width: 100%;"></el-input-number>
+                    </el-form-item>
+                    <el-form-item label="HEV">
+                        <el-input-number v-model="editForm.hev" :min="0" :precision="0" :step="1" style="width: 100%;"></el-input-number>
+                    </el-form-item>
+                    <el-form-item label="EV">
+                        <el-input-number v-model="editForm.ev" :min="0" :precision="0" :step="1" style="width: 100%;"></el-input-number>
+                    </el-form-item>
+                </template>
+                <el-form-item label="备注">
+                    <el-input v-model="editForm.remark" type="textarea" :rows="2" maxlength="200" show-word-limit></el-input>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="editVisible = false">取消</el-button>
+                <el-button type="primary" :loading="editSaving" @click="saveEditRecord">保存修改</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <!-- Vue 3 & Element Plus & ECharts Scripts -->
@@ -635,8 +720,25 @@
                     startSoc: null, endSoc: 100
                 });
 
-                // 核心获取真实里程的函数
-                const getMileage = (r) => r.totalMileage || (r.hev + r.ev) || 0;
+                // 记录编辑（弹窗）状态
+                const editVisible = ref(false);
+                const editSaving = ref(false);
+                const editingId = ref('');
+                const editForm = reactive({
+                    date: '', recordType: 'expense', categoryId: '', categoryName: '', subCategoryList: [],
+                    amount: 0, hev: 0, ev: 0, liters: 0, kwh: null, kwhSource: 'pile', totalMileage: 0, remark: '',
+                    startSoc: null, endSoc: null
+                });
+                const editCategories = computed(() =>
+                    categories.value.filter(c => c.type === (editForm.recordType === 'income' ? 'income' : 'expense'))
+                );
+                const editTargetCategory = computed(() => categories.value.find(c => c.id === editForm.categoryId));
+                const editActiveSubItems = computed(() =>
+                    editTargetCategory.value ? editTargetCategory.value.subItems.filter(s => s.active !== false) : []
+                );
+
+                // 核心获取真实里程的函数（显式数值化，避免字符串里程参与运算）
+                const getMileage = (r) => Number(r.totalMileage) || ((Number(r.hev) || 0) + (Number(r.ev) || 0)) || 0;
 
                 // 表格 SOC 展示：空值（非充电记录或未填写）统一显示为 "-"
                 const formatSoc = (val) => (val === null || val === undefined || val === '') ? '-' : val;
@@ -660,8 +762,9 @@
                 const tableStats = computed(() => {
                     let exp = 0, inc = 0;
                     filteredTableRecords.value.forEach(r => {
-                        if(r.recordType === 'expense') exp += r.amount;
-                        else inc += r.amount;
+                        const amount = Number(r.amount) || 0;
+                        if(r.recordType === 'expense') exp += amount;
+                        else inc += amount;
                     });
                     return { exp, inc };
                 });
@@ -781,6 +884,16 @@
                     }
                 );
 
+                // 编辑弹窗内 HEV + EV 联动总里程
+                watch(
+                    () => (Number(editForm.hev) || 0) + (Number(editForm.ev) || 0),
+                    (newSum) => {
+                        if (newSum > 0 && editForm.categoryName && requiresMileage(editForm.categoryName)) {
+                            editForm.totalMileage = newSum;
+                        }
+                    }
+                );
+
                 const currentPage = ref(1);
                 const pageSize = ref(10);
 
@@ -860,6 +973,38 @@
                     });
                 };
 
+                // 数值字段归一化：历史导入或旧版本数据可能把金额等字段存为字符串，
+                // 直接参与累加会发生字符串拼接，导致金额异常偏大；加载与导入时统一转为有限数值。
+                const toFiniteNumber = (val, fallback = 0) => {
+                    const num = Number(val);
+                    return Number.isFinite(num) ? num : fallback;
+                };
+
+                // 载入 / 导入时清洗记录：数值归一化 + 按 id 去重，避免脏数据随整表写回扩散
+                const normalizeRecords = (list) => {
+                    const seenIds = new Set();
+                    return (Array.isArray(list) ? list : []).reduce((acc, raw) => {
+                        if (!raw || typeof raw !== 'object') return acc;
+                        if (raw.id !== null && raw.id !== undefined && String(raw.id) !== '') {
+                            const key = String(raw.id);
+                            if (seenIds.has(key)) return acc;
+                            seenIds.add(key);
+                        }
+                        const r = { ...raw };
+                        r.amount = toFiniteNumber(r.amount);
+                        r.liters = toFiniteNumber(r.liters);
+                        r.hev = toFiniteNumber(r.hev);
+                        r.ev = toFiniteNumber(r.ev);
+                        r.totalMileage = toFiniteNumber(r.totalMileage);
+                        const emptyKwh = r.kwh === null || r.kwh === undefined || r.kwh === '';
+                        r.kwh = emptyKwh ? null : toFiniteNumber(r.kwh, null);
+                        r.startSoc = toSocInt(r.startSoc);
+                        r.endSoc = toSocInt(r.endSoc);
+                        acc.push(r);
+                        return acc;
+                    }, []);
+                };
+
                 const loadData = () => {
                     const savedVehicles = localStorage.getItem('hev_vehicles');
                     if (savedVehicles) vehicles.value = JSON.parse(savedVehicles);
@@ -901,13 +1046,13 @@
                     
                     const savedRecords = localStorage.getItem('hev_records');
                     if (savedRecords) {
-                        let parsedRecords = JSON.parse(savedRecords);
+                        let parsedRecords = normalizeRecords(JSON.parse(savedRecords));
                         parsedRecords.forEach(r => {
                             if (!r.recordType) r.recordType = 'expense'; 
                             if (!r.vehicleId) r.vehicleId = vehicles.value[0].id; 
                         });
                         records.value = parsedRecords;
-                        records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                        // 历史数据一次性重排任务已取消：列表顺序以当前数组顺序为准，不再自动置换写回
                     }
 
                     const savedSettings = localStorage.getItem('hev_app_settings');
@@ -1067,24 +1212,29 @@
                 const socFieldLabels = { startSoc: '起始SOC(%)', endSoc: '终止SOC(%)' };
 
                 // 输入阶段仅保留数字字符，避免小数、负号、字母等非法内容
-                const handleSocInput = (key, val) => {
-                    form[key] = String(val === null || val === undefined ? '' : val).replace(/\D/g, '').slice(0, 3);
+                const applySocInput = (target, key, val) => {
+                    target[key] = String(val === null || val === undefined ? '' : val).replace(/\D/g, '').slice(0, 3);
                 };
 
                 // 空值视为未填写；超出 0-100 时提示并修正到最近的边界值
-                const validateSoc = (key) => {
-                    const raw = String(form[key] === null || form[key] === undefined ? '' : form[key]).trim();
-                    if (raw === '') { form[key] = null; return; }
+                const validateSocOn = (target, key) => {
+                    const raw = String(target[key] === null || target[key] === undefined ? '' : target[key]).trim();
+                    if (raw === '') { target[key] = null; return; }
                     const num = parseInt(raw, 10);
-                    if (isNaN(num)) { form[key] = null; return; }
+                    if (isNaN(num)) { target[key] = null; return; }
                     if (num < 0 || num > 100) {
                         const fixed = Math.min(100, Math.max(0, num));
-                        form[key] = fixed;
+                        target[key] = fixed;
                         ElementPlus.ElMessage.warning(`${socFieldLabels[key]}需为 0-100 之间的整数，已自动修正为 ${fixed}`);
                         return;
                     }
-                    form[key] = num;
+                    target[key] = num;
                 };
+
+                const handleSocInput = (key, val) => applySocInput(form, key, val);
+                const validateSoc = (key) => validateSocOn(form, key);
+                const handleEditSocInput = (key, val) => applySocInput(editForm, key, val);
+                const validateEditSoc = (key) => validateSocOn(editForm, key);
 
                 // 持久化前统一转为整数或 null，保证旧记录与字符串输入都不会写入脏数据
                 const toSocInt = (val) => {
@@ -1136,8 +1286,9 @@
                     newRecord.subCategoryIds = catObj
                         ? catObj.subItems.filter(s => selectedNames.includes(s.name)).map(s => s.id)
                         : [];
-                    records.value.push(newRecord);
-                    records.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    // 新增记录默认置于列表顶部（按添加时间倒序）
+                    records.value.unshift(newRecord);
+                    currentPage.value = 1;
                     saveData();
                     ElementPlus.ElMessage.success('记录保存成功！');
                     if (form.categoryName && requiresMileage(form.categoryName)) prefillLatestMileage();
@@ -1150,6 +1301,215 @@
                     saveData();
                     ElementPlus.ElMessage.success('已删除记录');
                     updateCharts();
+                };
+
+                // ==================== 记录拖拽排序 ====================
+                const recordsTableWrap = ref(null);
+                const draggingId = ref('');
+                const dragOverId = ref('');
+
+                const recordRowClassName = ({ row }) => {
+                    if (row.id === draggingId.value) return 'drag-row-dragging';
+                    if (row.id === dragOverId.value) return 'drag-row-over';
+                    return '';
+                };
+
+                const onDragStart = (event, row) => {
+                    if (!canEdit.value) {
+                        event.preventDefault();
+                        ElementPlus.ElMessage.warning('当前为只读角色，无法调整顺序');
+                        return;
+                    }
+                    draggingId.value = row.id;
+                    dragOverId.value = '';
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        try { event.dataTransfer.setData('text/plain', String(row.id)); } catch (e) {}
+                    }
+                };
+
+                const onDragEnd = () => {
+                    draggingId.value = '';
+                    dragOverId.value = '';
+                };
+
+                const getRowRecordFromEvent = (target) => {
+                    if (!(target instanceof Element)) return null;
+                    const tr = target.closest('tr.el-table__row');
+                    if (!tr || !tr.parentElement) return null;
+                    const idx = Array.prototype.indexOf.call(tr.parentElement.children, tr);
+                    return paginatedRecords.value[idx] || null;
+                };
+
+                const handleTableDragOver = (event) => {
+                    if (!draggingId.value) return;
+                    const row = getRowRecordFromEvent(event.target);
+                    if (!row) return;
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                    if (dragOverId.value !== row.id) dragOverId.value = row.id;
+                };
+
+                const handleTableDragLeave = (event) => {
+                    const wrap = recordsTableWrap.value;
+                    if (wrap && event.relatedTarget && wrap.contains(event.relatedTarget)) return;
+                    dragOverId.value = '';
+                };
+
+                const handleTableDrop = (event) => {
+                    if (!draggingId.value) return;
+                    const row = getRowRecordFromEvent(event.target);
+                    if (!row) return;
+                    event.preventDefault();
+                    moveRecord(draggingId.value, row.id);
+                    draggingId.value = '';
+                    dragOverId.value = '';
+                };
+
+                // 将记录移动到目标记录所在位置，并立即持久化，保证刷新后顺序一致
+                const moveRecord = (fromId, toId) => {
+                    if (!requireEdit()) return;
+                    if (fromId === toId) return;
+                    const list = records.value.slice();
+                    const from = list.findIndex(r => r.id === fromId);
+                    const to = list.findIndex(r => r.id === toId);
+                    if (from < 0 || to < 0) return;
+                    const [moved] = list.splice(from, 1);
+                    list.splice(to, 0, moved);
+                    records.value = list;
+                    saveData();
+                    ElementPlus.ElMessage.success('顺序已更新');
+                };
+
+                // ==================== 单条记录编辑 ====================
+                const handleEditRecordTypeChange = () => {
+                    editForm.categoryId = '';
+                    editForm.categoryName = '';
+                    editForm.subCategoryList = [];
+                    editForm.amount = 0;
+                    editForm.liters = 0;
+                    editForm.kwh = null;
+                    editForm.kwhSource = null;
+                    editForm.startSoc = null;
+                    editForm.endSoc = null;
+                    editForm.hev = 0;
+                    editForm.ev = 0;
+                    editForm.totalMileage = 0;
+                };
+
+                const handleEditCategoryChange = (val) => {
+                    const cat = categories.value.find(c => c.id === val);
+                    editForm.categoryName = cat ? cat.name : '';
+                    editForm.subCategoryList = [];
+                    if (!cat || cat.name !== '加油') editForm.liters = 0;
+                    if (!cat || cat.name !== '充电') {
+                        editForm.kwh = null;
+                        editForm.kwhSource = null;
+                        editForm.startSoc = null;
+                        editForm.endSoc = null;
+                    } else {
+                        editForm.kwhSource = 'pile';
+                        editForm.startSoc = null;
+                        editForm.endSoc = 100;
+                    }
+                    if (!cat || !cat.requireMileage) {
+                        editForm.hev = 0;
+                        editForm.ev = 0;
+                        editForm.totalMileage = 0;
+                    }
+                };
+
+                const openEditRecord = (row) => {
+                    if (!requireEdit()) return;
+                    editingId.value = row.id;
+                    const kwhValue = (row.kwh === null || row.kwh === undefined || row.kwh === '') ? null : Number(row.kwh);
+                    const socValue = (val) => (val === null || val === undefined || val === '') ? null : val;
+                    editForm.date = row.date || '';
+                    editForm.recordType = row.recordType || 'expense';
+                    editForm.categoryId = row.categoryId || '';
+                    editForm.categoryName = row.categoryName || '';
+                    editForm.subCategoryList = String(row.subCategory || '').split('、').filter(Boolean);
+                    editForm.amount = Number(row.amount) || 0;
+                    editForm.liters = Number(row.liters) || 0;
+                    editForm.kwh = kwhValue;
+                    editForm.kwhSource = row.kwhSource || 'pile';
+                    editForm.startSoc = socValue(row.startSoc);
+                    editForm.endSoc = socValue(row.endSoc);
+                    editForm.hev = Number(row.hev) || 0;
+                    editForm.ev = Number(row.ev) || 0;
+                    editForm.totalMileage = Number(row.totalMileage) || (editForm.hev + editForm.ev);
+                    editForm.remark = row.remark || '';
+                    editVisible.value = true;
+                };
+
+                const saveEditRecord = () => {
+                    if (!requireEdit()) return;
+                    if (!editForm.date) {
+                        ElementPlus.ElMessage.error('请选择日期');
+                        return;
+                    }
+                    if (!editForm.categoryId) {
+                        ElementPlus.ElMessage.error('请选择记录类别');
+                        return;
+                    }
+                    const amount = Number(editForm.amount);
+                    if (!isFinite(amount) || amount < 0) {
+                        ElementPlus.ElMessage.error('请输入有效的金额');
+                        return;
+                    }
+                    const record = records.value.find(r => r.id === editingId.value);
+                    if (!record) {
+                        ElementPlus.ElMessage.error('记录不存在，可能已被删除');
+                        editVisible.value = false;
+                        return;
+                    }
+                    // SOC 输入统一校验，非法值提示并修正后再保存
+                    validateSocOn(editForm, 'startSoc');
+                    validateSocOn(editForm, 'endSoc');
+                    const cat = categories.value.find(c => c.id === editForm.categoryId);
+                    const catName = cat ? cat.name : editForm.categoryName;
+
+                    editSaving.value = true;
+                    ElementPlus.ElMessageBox.confirm('确认保存对该记录的修改？', '保存确认', {
+                        confirmButtonText: '确认保存', cancelButtonText: '取消', type: 'warning'
+                    }).then(() => {
+                        const names = (editForm.subCategoryList || []).filter(Boolean);
+                        record.date = editForm.date;
+                        record.recordType = editForm.recordType;
+                        record.categoryId = editForm.categoryId;
+                        record.categoryName = catName;
+                        record.subCategory = names.join('、');
+                        record.subCategoryIds = cat
+                            ? cat.subItems.filter(s => names.includes(s.name)).map(s => s.id)
+                            : [];
+                        record.amount = Math.round(amount * 100) / 100;
+                        record.remark = String(editForm.remark || '').trim();
+                        record.liters = catName === '加油' ? (Number(editForm.liters) || 0) : 0;
+                        if (catName === '充电') {
+                            const kwh = (typeof editForm.kwh === 'number' && !isNaN(editForm.kwh)) ? editForm.kwh : null;
+                            record.kwh = kwh;
+                            record.kwhSource = (kwh && kwh > 0) ? (editForm.kwhSource === 'vehicle' ? 'vehicle' : 'pile') : null;
+                            record.startSoc = toSocInt(editForm.startSoc);
+                            record.endSoc = toSocInt(editForm.endSoc);
+                        } else {
+                            record.kwh = null;
+                            record.kwhSource = null;
+                            record.startSoc = null;
+                            record.endSoc = null;
+                        }
+                        if (requiresMileage(catName)) {
+                            record.hev = Number(editForm.hev) || 0;
+                            record.ev = Number(editForm.ev) || 0;
+                            record.totalMileage = Number(editForm.totalMileage) || (record.hev + record.ev);
+                        }
+                        saveData();
+                        editSaving.value = false;
+                        editVisible.value = false;
+                        ElementPlus.ElMessage.success('记录已更新');
+                        updateCharts();
+                    }).catch(() => {
+                        editSaving.value = false;
+                    });
                 };
 
                 const saveCategories = () => saveData();
@@ -1599,26 +1959,31 @@
                             const stat = periodData[p];
                             const isMileageValid = requiresMileage(r.categoryName);
                             const validMileage = !isMileageValid ? 0 : getMileage(r);
+                            // 聚合前显式数值化，杜绝字符串金额被累加为拼接结果
+                            const amount = Number(r.amount) || 0;
+                            const liters = Number(r.liters) || 0;
+                            const hev = Number(r.hev) || 0;
+                            const ev = Number(r.ev) || 0;
                             
-                            stat.liters += (r.categoryName === '加油' ? (r.liters || 0) : 0);
-                            stat.chargeAmt += (r.categoryName === '充电' ? (r.recordType === 'income' ? 0 : r.amount) : 0);
+                            stat.liters += (r.categoryName === '加油' ? liters : 0);
+                            stat.chargeAmt += (r.categoryName === '充电' ? (r.recordType === 'income' ? 0 : amount) : 0);
                             
-                            stat.totalCost += (r.recordType === 'income' ? -r.amount : r.amount);
+                            stat.totalCost += (r.recordType === 'income' ? -amount : amount);
                             if (r.categoryName === '加油' || r.categoryName === '充电') {
-                                stat.energyCost += (r.recordType === 'income' ? 0 : r.amount);
+                                stat.energyCost += (r.recordType === 'income' ? 0 : amount);
                             }
 
                             if (validMileage > 0) {
                                 if (stat.maxTotal === -1 || validMileage > stat.maxTotal) stat.maxTotal = validMileage;
                                 if (stat.minTotal === -1 || validMileage < stat.minTotal) stat.minTotal = validMileage;
                             }
-                            if (r.hev > 0 && isMileageValid) {
-                                if (stat.maxHev === -1 || r.hev > stat.maxHev) stat.maxHev = r.hev;
-                                if (stat.minHev === -1 || r.hev < stat.minHev) stat.minHev = r.hev;
+                            if (hev > 0 && isMileageValid) {
+                                if (stat.maxHev === -1 || hev > stat.maxHev) stat.maxHev = hev;
+                                if (stat.minHev === -1 || hev < stat.minHev) stat.minHev = hev;
                             }
-                            if (r.ev > 0 && isMileageValid) {
-                                if (stat.maxEv === -1 || r.ev > stat.maxEv) stat.maxEv = r.ev;
-                                if (stat.minEv === -1 || r.ev < stat.minEv) stat.minEv = r.ev;
+                            if (ev > 0 && isMileageValid) {
+                                if (stat.maxEv === -1 || ev > stat.maxEv) stat.maxEv = ev;
+                                if (stat.minEv === -1 || ev < stat.minEv) stat.minEv = ev;
                             }
                         });
 
@@ -1698,7 +2063,8 @@
                     let pieDataMap = {};
                     rawRecordsForCategory.forEach(r => {
                         if (r.recordType !== 'income') {
-                            pieDataMap[r.categoryName] = (pieDataMap[r.categoryName] || 0) + r.amount;
+                            const amount = Number(r.amount) || 0;
+                            pieDataMap[r.categoryName] = (pieDataMap[r.categoryName] || 0) + amount;
                         }
                     });
                     let pieData = Object.keys(pieDataMap).map(k => ({ name: k, value: pieDataMap[k].toFixed(2) }));
@@ -1706,7 +2072,8 @@
                     let subCatMap = {};
                     rawRecordsForCategory.forEach(r => {
                         if (r.categoryName === selectedChartCategory.value && r.subCategory && r.recordType !== 'income') {
-                            subCatMap[r.subCategory] = (subCatMap[r.subCategory] || 0) + r.amount;
+                            const amount = Number(r.amount) || 0;
+                            subCatMap[r.subCategory] = (subCatMap[r.subCategory] || 0) + amount;
                         }
                     });
                     let subCatData = Object.keys(subCatMap).map(k => ({ name: k, value: subCatMap[k].toFixed(2) }));
@@ -1740,10 +2107,11 @@
                     rawRecordsForCategory.forEach(r => {
                         if (r.categoryName === selectedChartCategory.value) {
                             let key = getPeriodKey(r.date);
+                            const amount = Number(r.amount) || 0;
                             if (catTrendMap[key] !== undefined) {
-                                catTrendMap[key] += r.amount;
+                                catTrendMap[key] += amount;
                             } else {
-                                catTrendMap[key] = r.amount;
+                                catTrendMap[key] = amount;
                             }
                         }
                     });
@@ -1963,7 +2331,7 @@
                                 else vehicles.value = defaultVehicles;
                                 
                                 categories.value = data.categories;
-                                records.value = data.records;
+                                records.value = normalizeRecords(data.records);
                                 if (data.settings) Object.assign(appSettings, data.settings);
                                 
                                 currentVehicleId.value = vehicles.value[0].id;
@@ -1989,7 +2357,16 @@
                     validateTimeScaleBoundaries();
                     loadData();
                     applyDefaultCategory();
-                    nextTick(() => { initCharts(); });
+                    nextTick(() => {
+                        initCharts();
+                        // 拖拽排序使用原生事件委托，绑定在表格容器上避免行重渲染后失效
+                        const wrap = recordsTableWrap.value;
+                        if (wrap) {
+                            wrap.addEventListener('dragover', handleTableDragOver);
+                            wrap.addEventListener('dragleave', handleTableDragLeave);
+                            wrap.addEventListener('drop', handleTableDrop);
+                        }
+                    });
                     
                     window.addEventListener('resize', () => {
                         if(gasChart) gasChart.resize();
@@ -2012,6 +2389,10 @@
                     tableFilter, filteredTableRecords, tableStats, maintenanceInfo, insuranceInfo, inspectionInfo,
                     handleRecordTypeChange, handleCategoryChange, saveRecord, deleteRecord,
                     handleSocInput, validateSoc,
+                    recordsTableWrap, recordRowClassName, onDragStart, onDragEnd,
+                    editVisible, editSaving, editForm, editCategories, editTargetCategory, editActiveSubItems,
+                    openEditRecord, saveEditRecord, handleEditRecordTypeChange, handleEditCategoryChange,
+                    handleEditSocInput, validateEditSoc,
                     saveCategories, addCategory, editCategory, deleteCategory, addSubItem, removeSubItem,
                     renameSubItem, renameSnapshot, undoLastRename, saveSettings,
                     canEdit, canManage, currentRole, opLogs, loadOpLogs, logActionLabel, formatLogTime,
