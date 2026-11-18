@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>混动车日常费用记录</title>
+    <title>混动车全生命周期记录</title>
     <!-- Element Plus CSS -->
     <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
     <style>
@@ -2281,7 +2281,7 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `混动车记账备份_${new Date().toISOString().slice(0,10)}.json`;
+                    a.download = `混动车全生命周期记录备份_${new Date().toISOString().slice(0,10)}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
                 };
@@ -2311,7 +2311,7 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `混动车记账数据导出_${new Date().toISOString().slice(0,10)}.csv`;
+                    a.download = `混动车全生命周期数据导出_${new Date().toISOString().slice(0,10)}.csv`;
                     a.click();
                     URL.revokeObjectURL(url);
                 };
